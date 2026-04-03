@@ -2,6 +2,7 @@
 # RAG AI 어시스턴트 - 패키지 목록
 # Python 3.12 / Windows / 폐쇄망 환경
 # 설치: pip install -r requirements.txt
+# 다운로드: pip download -r requirements.txt -d wheels
 # 폐쇄망: pip install --no-index --find-links=./wheels -r requirements.txt
 # =============================================
 
