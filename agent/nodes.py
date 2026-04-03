@@ -38,6 +38,34 @@ def _log(msg: str) -> str:
 
 
 # ── 1. Router 노드 ─────────────────────────────────────────────────────────
+def _has_documents() -> bool:
+    """Qdrant에 저장된 문서가 1개 이상 있으면 True"""
+    try:
+        from rag.vector_store import get_file_list
+        return len(get_file_list()) > 0
+    except Exception:
+        return False
+
+
+def _parse_route(raw: str) -> str:
+    """
+    LLM 응답에서 라우팅 키워드를 추출한다.
+    llama3.1:8b 는 "- rag", "rag.", "RAG (문서 관련)" 등 다양하게 반환하므로
+    완전 일치 대신 포함 여부로 판단한다.
+    """
+    text = raw.strip().lower()
+    # 우선순위: both > db > rag > general
+    if "both" in text:
+        return "both"
+    if "db" in text or "database" in text or "sql" in text or "데이터베이스" in text:
+        return "db"
+    if "rag" in text or "document" in text or "문서" in text:
+        return "rag"
+    if "general" in text or "일반" in text:
+        return "general"
+    return None   # 판단 불가 → 호출부에서 처리
+
+
 def router_node(state: GraphState) -> dict:
     """
     질문을 분석해 처리 경로를 결정한다.
@@ -45,27 +73,54 @@ def router_node(state: GraphState) -> dict:
     - db     : 데이터베이스 조회가 필요한 경우
     - both   : 문서 + DB 모두 필요한 복합 질문
     - general: 일반 대화/상식 질문
+
+    [수정] 3가지 버그 수정:
+    1. LLM 응답 파싱을 포함(in) 방식으로 변경 (완전일치 → general 폴백 방지)
+    2. 영어 프롬프트 + 퓨샷 예시 추가 (llama3.1:8b 정확도 향상)
+    3. 문서가 있을 때 판단 불가 시 rag로 기본 처리 (general 폴백 방지)
     """
     question = state["question"]
     llm = get_llm()
+    docs_exist = _has_documents()
 
-    system_prompt = """당신은 질문 분류 전문가입니다. 아래 4가지 중 하나만 출력하세요.
-- rag    : 문서(PDF, TXT 등)에서 정보를 찾아야 하는 질문
-- db     : 데이터베이스 조회(통계, 목록, 집계 등)가 필요한 질문
-- both   : 문서와 DB 두 곳 모두 확인해야 하는 복합 질문
-- general: 일반 대화, 인사, 상식, 계산 등
-반드시 네 단어 중 하나만 출력하세요."""
+    # [수정 2] 영어 프롬프트 + 퓨샷 예시로 llama3.1:8b 정확도 향상
+    system_prompt = """You are a routing classifier. Output ONLY one word from: rag, db, both, general
 
+Rules:
+- rag    : question about uploaded documents, files, manuals, reports, papers
+- db     : question requiring database query (statistics, counts, lists from DB)
+- both   : question requiring BOTH documents AND database
+- general: greeting, math, common knowledge, anything else
+
+Examples:
+Q: "What does the document say about refund policy?" -> rag
+Q: "How many users registered last month?" -> db
+Q: "Summarize the report and show total sales" -> both
+Q: "Hello, how are you?" -> general
+Q: "What is the main topic of the uploaded file?" -> rag
+Q: "안녕하세요" -> general
+Q: "업로드한 문서에서 환불 정책을 알려줘" -> rag
+Q: "지난달 매출 합계는?" -> db
+
+Output ONLY the single word. No explanation."""
+
+    route = None
     try:
         response = llm.invoke([
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"질문: {question}"),
+            HumanMessage(content=f"Q: {question}"),
         ])
-        route = response.content.strip().lower()
-        # 예외 처리: 알 수 없는 응답이면 general로 폴백
-        if route not in ("rag", "db", "both", "general"):
-            route = "general"
+        # [수정 1] 포함 방식 파싱으로 변경
+        route = _parse_route(response.content)
     except Exception as e:
+        pass
+
+    # [수정 3] LLM 판단 실패 시 문서 유무로 기본값 결정
+    if route is None:
+        route = "rag" if docs_exist else "general"
+
+    # 문서가 없는데 rag/both로 분류된 경우 general로 전환
+    if route in ("rag", "both") and not docs_exist:
         route = "general"
 
     # A2A 메시지: Router → 다음 에이전트에게 라우팅 결과 전달
