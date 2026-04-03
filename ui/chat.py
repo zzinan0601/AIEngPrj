@@ -80,15 +80,20 @@ def render_chat():
             a2a_msgs = result.get("a2a_messages", [])
             sql = result.get("generated_sql", "")
             route = result.get("route", "")
+            context = result.get("context", "")
 
             # 답변 표시
             status_placeholder.empty()
-            st.markdown(answer)
 
-            # 라우팅 정보 표시 (작은 뱃지)
+            # 라우팅 경로 + 컨텍스트 확인 뱃지 (맨 위에 표시)
             if route:
                 route_emoji = {"rag": "📚", "db": "🗄️", "both": "📚🗄️", "general": "💬"}.get(route, "")
-                st.caption(f"{route_emoji} 처리 경로: {route.upper()}")
+                if route == "rag" and not context:
+                    st.warning("⚠️ 문서를 검색했지만 관련 내용을 찾지 못했습니다. 문서가 정상적으로 업로드·저장됐는지 확인하세요.")
+                else:
+                    st.caption(f"{route_emoji} 처리 경로: **{route.upper()}**")
+
+            st.markdown(answer)
 
             # SQL 표시 (DB 경로인 경우)
             if sql and sql not in ("", "(MCP 경유)"):
