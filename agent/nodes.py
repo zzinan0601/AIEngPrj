@@ -66,6 +66,25 @@ def _parse_route(raw: str) -> str:
     return None   # 판단 불가 → 호출부에서 처리
 
 
+def _has_explicit_doc_reference(question: str) -> bool:
+    """
+    사용자가 명시적으로 문서 참조를 요청했는지 확인.
+    이 경우 LLM 판단 없이 즉시 rag로 강제한다.
+    """
+    keywords = [
+        # 한국어
+        "문서", "파일", "첨부", "업로드", "pdf", "txt", "docx",
+        "참조", "참고", "기반으로", "바탕으로", "내용에서",
+        "문서에서", "파일에서", "자료에서", "보고서에서",
+        # 영어
+        "document", "file", "uploaded", "attached", "based on",
+        "according to", "from the", "in the document", "in the file",
+        "refer to", "reference",
+    ]
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in keywords)
+
+
 def router_node(state: GraphState) -> dict:
     """
     질문을 분석해 처리 경로를 결정한다.
@@ -74,16 +93,36 @@ def router_node(state: GraphState) -> dict:
     - both   : 문서 + DB 모두 필요한 복합 질문
     - general: 일반 대화/상식 질문
 
-    [수정] 3가지 버그 수정:
-    1. LLM 응답 파싱을 포함(in) 방식으로 변경 (완전일치 → general 폴백 방지)
-    2. 영어 프롬프트 + 퓨샷 예시 추가 (llama3.1:8b 정확도 향상)
-    3. 문서가 있을 때 판단 불가 시 rag로 기본 처리 (general 폴백 방지)
+    우선순위:
+    1. 명시적 문서 참조 키워드 → 즉시 rag (LLM 호출 생략)
+    2. LLM 분류 (영어 프롬프트 + 퓨샷)
+    3. LLM 판단 불가 + 문서 존재 → rag 폴백
+    4. 문서 없음 → general
     """
     question = state["question"]
-    llm = get_llm()
     docs_exist = _has_documents()
 
-    # [수정 2] 영어 프롬프트 + 퓨샷 예시로 llama3.1:8b 정확도 향상
+    # ── 우선순위 1: 명시적 문서 참조 키워드 감지 ──────────────────
+    # "document를 참조해서", "문서에서", "파일 기반으로" 등이 있으면
+    # LLM 호출 없이 즉시 rag로 강제
+    if docs_exist and _has_explicit_doc_reference(question):
+        route = "rag"
+        log_msg = _log(f"🔀 라우팅 결정: [RAG] (명시적 문서 참조 감지)")
+        a2a_msg: A2AMessage = {
+            "sender": "router",
+            "receiver": "rag",
+            "content": f"명시적 문서 참조 키워드 감지 → RAG 강제",
+            "msg_type": "request",
+        }
+        return {
+            "route": route,
+            "logs": [log_msg],
+            "a2a_messages": [a2a_msg],
+            "iteration": state.get("iteration", 0),
+        }
+
+    # ── 우선순위 2: LLM 분류 ──────────────────────────────────────
+    llm = get_llm()
     system_prompt = """You are a routing classifier. Output ONLY one word from: rag, db, both, general
 
 Rules:
@@ -110,16 +149,14 @@ Output ONLY the single word. No explanation."""
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Q: {question}"),
         ])
-        # [수정 1] 포함 방식 파싱으로 변경
         route = _parse_route(response.content)
-    except Exception as e:
+    except Exception:
         pass
 
-    # [수정 3] LLM 판단 실패 시 문서 유무로 기본값 결정
+    # ── 우선순위 3 & 4: 폴백 ─────────────────────────────────────
     if route is None:
         route = "rag" if docs_exist else "general"
 
-    # 문서가 없는데 rag/both로 분류된 경우 general로 전환
     if route in ("rag", "both") and not docs_exist:
         route = "general"
 
