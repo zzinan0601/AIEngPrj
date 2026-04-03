@@ -31,11 +31,14 @@ ollama>=0.4.0
 # 4. 임베딩 / 리랭커  (BGE-M3, BGE-Reranker)
 #    → 허깅페이스 오프라인 사용 (로컬 캐시 필요)
 # ──────────────────────────────────────────
+langchain-huggingface>=0.1.0,<0.2.0  # ★ HuggingFaceEmbeddings 등 LangChain↔HF 브릿지
+                                      #   (langchain-community의 HF기능이 이 패키지로 분리됨)
 FlagEmbedding>=1.2.11                 # BGE-M3 + BGE-Reranker 통합 패키지
 sentence-transformers>=3.0.0,<4.0.0
 transformers>=4.40.0,<5.0.0
 torch>=2.2.0                          # CPU 전용이면 torch --index-url 옵션 사용
 tokenizers>=0.19.0
+huggingface-hub>=0.23.0               # 모델 로컬 캐시 경로 제어 (HF_HOME 환경변수 연동)
 
 # ──────────────────────────────────────────
 # 5. 벡터 DB  (Qdrant 로컬 모드)
