@@ -77,6 +77,7 @@ def build_graph() -> StateGraph:
             "rag": "rag",
             "db": "db",
             "general": "general",
+            "both": "rag",   # both → rag 먼저 (안전망: 함수가 rag 반환하지만 명시)
         },
     )
 
