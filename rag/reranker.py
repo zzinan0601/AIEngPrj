@@ -8,22 +8,28 @@ rag/reranker.py
 import config
 from sentence_transformers import CrossEncoder
 
-_reranker = None  # 싱글톤 인스턴스
+_reranker = None        # 싱글톤 인스턴스
+_reranker_available = None  # 로드 가능 여부 캐시
 
 
-def get_reranker() -> CrossEncoder:
+def get_reranker():
     """
     bge-reranker CrossEncoder 모델 반환 (최초 1회 로드).
-    모델 경로: config.RERANKER_MODEL_PATH (로컬 디렉토리)
+    모델 파일이 없으면 None 반환 → rerank()에서 원본 순서로 폴백.
     """
-    global _reranker
-    if _reranker is None:
-        _reranker = CrossEncoder(
-            config.RERANKER_MODEL_PATH,
-            max_length=512,     # 입력 토큰 최대 길이
-            device="cpu",       # 폐쇄망 CPU 환경
-        )
-    return _reranker
+    global _reranker, _reranker_available
+    if _reranker_available is None:   # 아직 시도 안 함
+        try:
+            _reranker = CrossEncoder(
+                config.RERANKER_MODEL_PATH,
+                max_length=512,
+                device="cpu",
+            )
+            _reranker_available = True
+        except Exception as e:
+            print(f"[reranker] 모델 로드 실패 (폴백 모드): {e}")
+            _reranker_available = False
+    return _reranker if _reranker_available else None
 
 
 def rerank(query: str, documents: list, top_k: int = None) -> list:
@@ -44,16 +50,11 @@ def rerank(query: str, documents: list, top_k: int = None) -> list:
     k = top_k or config.RERANK_TOP_K
     reranker = get_reranker()
 
-    # (query, document) 쌍 생성
+    # 모델 없으면 원본 순서에서 상위 k개만 반환 (폴백)
+    if reranker is None:
+        return documents[:k]
+
     pairs = [(query, doc) for doc in documents]
-
-    # 관련도 점수 계산
     scores = reranker.predict(pairs)
-
-    # 점수 기준 내림차순 정렬 후 상위 k개 반환
-    ranked = sorted(
-        zip(scores.tolist(), documents),
-        key=lambda x: x[0],
-        reverse=True,
-    )
+    ranked = sorted(zip(scores.tolist(), documents), key=lambda x: x[0], reverse=True)
     return [doc for _, doc in ranked[:k]]
