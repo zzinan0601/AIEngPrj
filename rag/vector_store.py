@@ -105,13 +105,14 @@ def search_documents(
     client = get_client()
 
     query_vector = embed_query(query)
-    results = client.search(
+    # qdrant-client >= 1.7.0 : search() 폐기 → query_points() 사용
+    response = client.query_points(
         collection_name=collection_name,
-        query_vector=query_vector,
+        query=query_vector,
         limit=top_k,
         with_payload=True,
     )
-    return [r.payload.get("page_content", "") for r in results]
+    return [r.payload.get("page_content", "") for r in response.points]
 
 
 def delete_by_filename(
