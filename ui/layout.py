@@ -50,10 +50,8 @@ def render_layout():
         render_sidebar_right()
 
     # ── 모달 팝업 처리 ────────────────────────────────────────────
-    # @st.dialog 내부에서 st.rerun() 호출 시 모달이 닫히므로
-    # 플래그를 즉시 False로 바꾸지 않고, 모달 함수 자체가 닫힘을 관리한다.
+    # elif 로 처리해 두 모달이 동시에 열리는 것을 원천 차단
     if st.session_state.get("show_doc_modal"):
         doc_management_modal()
-
-    if st.session_state.get("show_prompt_modal"):
+    elif st.session_state.get("show_prompt_modal"):
         prompt_fewshot_modal()
