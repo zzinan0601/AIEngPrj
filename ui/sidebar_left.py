@@ -31,12 +31,14 @@ def render_sidebar_left():
         if st.button("📂 문서 관리", use_container_width=True,
                      help="문서 업로드 및 파일 목록 관리"):
             st.session_state["show_doc_modal"] = True
+            st.session_state["show_prompt_modal"] = False   # 다른 모달 닫기
 
         st.markdown("")
 
         if st.button("⚙️ 프롬프트 / 퓨샷", use_container_width=True,
                      help="시스템 프롬프트 및 퓨샷 예제 관리"):
             st.session_state["show_prompt_modal"] = True
+            st.session_state["show_doc_modal"] = False      # 다른 모달 닫기
 
         st.markdown("")
 
