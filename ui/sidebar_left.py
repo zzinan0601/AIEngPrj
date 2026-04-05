@@ -1,20 +1,16 @@
 """
 ui/sidebar_left.py
-- 왼쪽 사이드바: 버튼 + 모델 선택 콤보박스
-- 모델 목록은 Ollama API에서 실시간으로 가져옴
-- 실패 시 .env 기본값으로 폴백
+- 왼쪽 사이드바: 버튼 + 모델/DB 선택 콤보박스
+- selectbox 변경 시 모달 플래그를 초기화해 팝업 방지
 """
 
 import streamlit as st
 import config
 
 
-@st.cache_data(ttl=60)   # 60초 캐시 (매번 API 호출 방지)
+@st.cache_data(ttl=60)
 def get_ollama_models() -> list:
-    """
-    Ollama 서버에서 다운로드된 모델 목록을 가져온다.
-    실패 시 config 기본 모델만 포함한 리스트 반환.
-    """
+    """Ollama 서버에서 설치된 모델 목록을 가져온다. 실패 시 기본값 반환."""
     try:
         import httpx
         resp = httpx.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=3)
@@ -24,6 +20,12 @@ def get_ollama_models() -> list:
     except Exception:
         pass
     return [config.LLM_MODEL]
+
+
+def _close_all_modals():
+    """selectbox 변경 등으로 rerun 발생 시 모달이 뜨지 않도록 플래그 초기화"""
+    st.session_state["show_doc_modal"]    = False
+    st.session_state["show_prompt_modal"] = False
 
 
 def render_sidebar_left():
@@ -44,65 +46,34 @@ def render_sidebar_left():
 
         st.divider()
 
-        # ── LLM 모델 선택 콤보박스 ──────────────────────────────────
-        st.markdown("#### 🤖 LLM 모델 선택")
+        # ── LLM 모델 선택 ────────────────────────────────────────────
+        st.markdown("#### 🤖 LLM 모델")
         models = get_ollama_models()
+        current_model = st.session_state.get("selected_model", config.LLM_MODEL)
+        model_idx = models.index(current_model) if current_model in models else 0
 
-        # 현재 선택값 유지 (세션에 없으면 config 기본값)
-        current = st.session_state.get("selected_model", config.LLM_MODEL)
-        # 현재 선택값이 목록에 없으면 0번 인덱스로
-        default_idx = models.index(current) if current in models else 0
-
-        selected = st.selectbox(
+        selected_model = st.selectbox(
             "모델 선택",
             options=models,
-            index=default_idx,
+            index=model_idx,
             label_visibility="collapsed",
-            help="Ollama에 설치된 모델 중 선택 (질문마다 즉시 반영)",
+            key="sb_model",
+            help="Ollama에 설치된 모델 중 선택",
+            on_change=_close_all_modals,   # 변경 시 모달 닫기
         )
-        st.session_state["selected_model"] = selected
+        st.session_state["selected_model"] = selected_model
 
-        # 현재 선택 모델 표시
-        st.markdown(
-            f"<div style='font-size:11px;color:#888;margin-top:-8px'>"
-            f"현재: <b>{selected}</b></div>",
-            unsafe_allow_html=True,
-        )
-
-        # 모델 목록 새로고침 버튼
         if st.button("🔄 목록 새로고침", use_container_width=True, key="refresh_models"):
             st.cache_data.clear()
+            _close_all_modals()
             st.rerun()
-
-        st.divider()
-
-        # ── DB 타입 선택 ─────────────────────────────────────────────
-        st.markdown("#### 🗄️ DB 설정")
-
-        db_types = ["sqlite", "postgresql", "oracle"]
-        current_db = st.session_state.get("db_type", config.DB_TYPE)
-        default_db_idx = db_types.index(current_db) if current_db in db_types else 0
-
-        selected_db = st.selectbox(
-            "DB 타입",
-            options=db_types,
-            index=default_db_idx,
-            label_visibility="collapsed",
-            help="접속 정보는 .env 파일에 설정 후 사용하세요",
-        )
-        st.session_state["db_type"] = selected_db
-        st.markdown(
-            f"<div style='font-size:11px;color:#888;margin-top:-8px'>"
-            f"현재: <b>{selected_db}</b></div>",
-            unsafe_allow_html=True,
-        )
 
         st.divider()
 
         # ── 기능 버튼 ───────────────────────────────────────────────
         if st.button("📂 문서 관리", use_container_width=True,
                      help="문서 업로드 및 파일 목록 관리"):
-            st.session_state["show_doc_modal"] = True
+            st.session_state["show_doc_modal"]    = True
             st.session_state["show_prompt_modal"] = False
 
         st.markdown("")
@@ -110,21 +81,36 @@ def render_sidebar_left():
         if st.button("⚙️ 프롬프트 / 퓨샷", use_container_width=True,
                      help="시스템 프롬프트 및 퓨샷 예제 관리"):
             st.session_state["show_prompt_modal"] = True
-            st.session_state["show_doc_modal"] = False
+            st.session_state["show_doc_modal"]    = False
 
         st.markdown("")
+
+        # ── DB 타입 선택 (스키마 임베딩 버튼 바로 위) ────────────────
+        db_types = ["sqlite", "postgresql", "oracle"]
+        current_db = st.session_state.get("db_type", config.DB_TYPE)
+        db_idx = db_types.index(current_db) if current_db in db_types else 0
+
+        selected_db = st.selectbox(
+            "DB 타입",
+            options=db_types,
+            index=db_idx,
+            label_visibility="visible",
+            key="sb_db_type",
+            help="접속 정보는 .env 파일에 설정하세요",
+            on_change=_close_all_modals,   # 변경 시 모달 닫기
+        )
+        st.session_state["db_type"] = selected_db
 
         if st.button("🗄️ DB 스키마 임베딩", use_container_width=True,
                      help="현재 DB 스키마를 벡터 DB에 저장"):
             with st.spinner("스키마 임베딩 중..."):
                 try:
                     from agent.db_agent import embed_db_schema
-                    db_type = st.session_state.get("db_type", config.DB_TYPE)
-                    count, _ = embed_db_schema(db_type)
+                    count, _ = embed_db_schema(selected_db)
                     if count > 0:
                         st.success(f"✅ {count}개 항목 임베딩 완료")
                         st.session_state["logs"].append(
-                            f"🗄️ DB 스키마 임베딩({db_type}): {count}항목"
+                            f"🗄️ DB 스키마 임베딩({selected_db}): {count}항목"
                         )
                     else:
                         st.warning("임베딩할 스키마가 없습니다")
