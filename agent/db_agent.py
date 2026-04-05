@@ -12,12 +12,12 @@ from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 
 
-def get_llm() -> ChatOllama:
-    """LLM 인스턴스 반환"""
+def get_llm(model_name: str = None) -> ChatOllama:
+    """LLM 인스턴스 반환 (model_name 미지정 시 config 기본값)"""
     return ChatOllama(
-        model=config.LLM_MODEL,
+        model=model_name or config.LLM_MODEL,
         base_url=config.OLLAMA_BASE_URL,
-        temperature=0.0,  # SQL 생성은 결정론적으로
+        temperature=0.0,
     )
 
 
