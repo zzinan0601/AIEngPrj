@@ -33,8 +33,26 @@ COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "documents")
 SCHEMA_COLLECTION: str = os.getenv("SCHEMA_COLLECTION", "schema")
 VECTOR_SIZE: int = int(os.getenv("VECTOR_SIZE", "1024"))  # bge-m3 출력 차원
 
-# ── DB ──────────────────────────────────────
+# ── DB 타입 및 접속 정보 ─────────────────────
+# DB_TYPE: sqlite | postgresql | oracle
+DB_TYPE: str = os.getenv("DB_TYPE", "sqlite")
+
+# SQLite
 DB_PATH: str = os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db"))
+
+# PostgreSQL
+PG_HOST: str     = os.getenv("PG_HOST", "localhost")
+PG_PORT: str     = os.getenv("PG_PORT", "5432")
+PG_USER: str     = os.getenv("PG_USER", "")
+PG_PASSWORD: str = os.getenv("PG_PASSWORD", "")
+PG_DBNAME: str   = os.getenv("PG_DBNAME", "")
+
+# Oracle
+ORA_HOST: str     = os.getenv("ORA_HOST", "localhost")
+ORA_PORT: str     = os.getenv("ORA_PORT", "1521")
+ORA_USER: str     = os.getenv("ORA_USER", "")
+ORA_PASSWORD: str = os.getenv("ORA_PASSWORD", "")
+ORA_SERVICE: str  = os.getenv("ORA_SERVICE", "")
 
 # ── 파일 경로 ────────────────────────────────
 PROMPTS_PATH: str = os.getenv("PROMPTS_PATH", str(BASE_DIR / "data" / "prompts"))
