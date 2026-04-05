@@ -106,11 +106,13 @@ def render_chat():
                 "content": answer,
                 "sql": sql,
             })
-            # 로그/A2A 누적 (operator.add처럼 append)
             st.session_state["logs"] = st.session_state.get("logs", []) + logs
             st.session_state["a2a_messages"] = (
                 st.session_state.get("a2a_messages", []) + a2a_msgs
             )
+            # 답변 생성 후 rerun 시 모달이 다시 열리지 않도록 플래그 초기화
+            st.session_state["show_doc_modal"] = False
+            st.session_state["show_prompt_modal"] = False
 
         except Exception as e:
             status_placeholder.empty()
