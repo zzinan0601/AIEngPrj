@@ -108,7 +108,12 @@ def doc_management_modal():
 
     # ── 파일 목록 탭 ─────────────────────────────────
     with tab_list:
-        file_list = get_file_list()
+        with st.spinner("파일 목록 불러오는 중..."):
+            try:
+                file_list = get_file_list()
+            except Exception as e:
+                st.error(f"파일 목록 조회 오류: {str(e)}")
+                return
 
         if not file_list:
             st.info("저장된 파일이 없습니다.")
