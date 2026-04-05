@@ -55,3 +55,6 @@ class GraphState(TypedDict):
 
     # 선택된 LLM 모델명 (UI 콤보박스에서 선택, 없으면 config 기본값 사용)
     selected_model: Optional[str]
+
+    # 선택된 DB 타입: sqlite | postgresql | oracle
+    db_type: Optional[str]
