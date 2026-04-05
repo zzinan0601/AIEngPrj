@@ -76,6 +76,29 @@ def render_sidebar_left():
 
         st.divider()
 
+        # ── DB 타입 선택 ─────────────────────────────────────────────
+        st.markdown("#### 🗄️ DB 설정")
+
+        db_types = ["sqlite", "postgresql", "oracle"]
+        current_db = st.session_state.get("db_type", config.DB_TYPE)
+        default_db_idx = db_types.index(current_db) if current_db in db_types else 0
+
+        selected_db = st.selectbox(
+            "DB 타입",
+            options=db_types,
+            index=default_db_idx,
+            label_visibility="collapsed",
+            help="접속 정보는 .env 파일에 설정 후 사용하세요",
+        )
+        st.session_state["db_type"] = selected_db
+        st.markdown(
+            f"<div style='font-size:11px;color:#888;margin-top:-8px'>"
+            f"현재: <b>{selected_db}</b></div>",
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
         # ── 기능 버튼 ───────────────────────────────────────────────
         if st.button("📂 문서 관리", use_container_width=True,
                      help="문서 업로드 및 파일 목록 관리"):
@@ -96,11 +119,12 @@ def render_sidebar_left():
             with st.spinner("스키마 임베딩 중..."):
                 try:
                     from agent.db_agent import embed_db_schema
-                    count, _ = embed_db_schema()
+                    db_type = st.session_state.get("db_type", config.DB_TYPE)
+                    count, _ = embed_db_schema(db_type)
                     if count > 0:
                         st.success(f"✅ {count}개 항목 임베딩 완료")
                         st.session_state["logs"].append(
-                            f"🗄️ DB 스키마 임베딩: {count}항목"
+                            f"🗄️ DB 스키마 임베딩({db_type}): {count}항목"
                         )
                     else:
                         st.warning("임베딩할 스키마가 없습니다")
