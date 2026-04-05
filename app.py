@@ -45,14 +45,9 @@ st.markdown(
 # ── 레이아웃 렌더링 ────────────────────────────────────────────────
 from ui.layout import render_layout
 
-# ── Qdrant 클라이언트 워밍업 ──────────────────────────────────────
-# 재시작 직후 모달 첫 오픈 시 지연이 없도록 미리 초기화한다.
-# @st.cache_resource 로 감싸서 세션당 1회만 실행한다.
-@st.cache_resource
-def _init_vector_store():
-    from rag.vector_store import warmup
-    warmup()
-
-_init_vector_store()
+# Qdrant 클라이언트 및 컬렉션 미리 초기화
+# (get_client 자체가 @st.cache_resource라 중복 생성 없음)
+from rag.vector_store import warmup
+warmup()
 
 render_layout()
