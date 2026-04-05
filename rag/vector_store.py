@@ -30,6 +30,19 @@ def get_client() -> QdrantClient:
     return _client
 
 
+def warmup():
+    """
+    앱 시작 시 클라이언트를 미리 초기화한다.
+    첫 사용자 요청 전에 호출해두면 모달 첫 오픈 시 지연 없음.
+    """
+    try:
+        get_client()
+        ensure_collection(config.COLLECTION_NAME)
+        ensure_collection(config.SCHEMA_COLLECTION)
+    except Exception:
+        pass
+
+
 def ensure_collection(collection_name: str = config.COLLECTION_NAME):
     """컬렉션이 없으면 자동 생성"""
     client = get_client()
@@ -145,34 +158,32 @@ def get_file_list(collection_name: str = config.COLLECTION_NAME) -> list:
     """
     저장된 파일 목록을 반환.
     각 파일마다 {filename, chunks, file_size, upload_date} 포함.
+    오류 발생 시 빈 리스트를 반환하지 않고 예외를 그대로 올린다
+    (호출부 UI에서 st.error로 표시).
     """
-    try:
-        ensure_collection(collection_name)
-        client = get_client()
+    ensure_collection(collection_name)
+    client = get_client()
 
-        points, _ = client.scroll(
-            collection_name=collection_name,
-            with_payload=True,
-            limit=50000,
-        )
+    points, _ = client.scroll(
+        collection_name=collection_name,
+        with_payload=True,
+        limit=50000,
+    )
 
-        # 파일명별 정보 집계
-        file_map: dict = {}
-        for point in points:
-            meta = point.payload.get("metadata", {})
-            fname = meta.get("filename", "unknown")
-            if fname not in file_map:
-                file_map[fname] = {
-                    "filename": fname,
-                    "chunks": 0,
-                    "file_size": meta.get("file_size", 0),    # bytes
-                    "upload_date": meta.get("upload_date", "-"),
-                }
-            file_map[fname]["chunks"] += 1
+    file_map: dict = {}
+    for point in points:
+        meta = point.payload.get("metadata", {})
+        fname = meta.get("filename", "unknown")
+        if fname not in file_map:
+            file_map[fname] = {
+                "filename": fname,
+                "chunks": 0,
+                "file_size": meta.get("file_size", 0),
+                "upload_date": meta.get("upload_date", "-"),
+            }
+        file_map[fname]["chunks"] += 1
 
-        return sorted(file_map.values(), key=lambda x: x["filename"])
-    except Exception:
-        return []
+    return sorted(file_map.values(), key=lambda x: x["filename"])
 
 
 def get_file_chunks(
