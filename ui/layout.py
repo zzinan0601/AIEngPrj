@@ -7,6 +7,7 @@ ui/layout.py
 """
 
 import streamlit as st
+import config
 from ui.sidebar_left import render_sidebar_left
 from ui.chat import render_chat
 from ui.sidebar_right import render_sidebar_right
