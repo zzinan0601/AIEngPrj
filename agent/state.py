@@ -52,3 +52,6 @@ class GraphState(TypedDict):
 
     # MCP 사용 여부 (True면 MCP 경유)
     use_mcp: bool
+
+    # 선택된 LLM 모델명 (UI 콤보박스에서 선택, 없으면 config 기본값 사용)
+    selected_model: Optional[str]
