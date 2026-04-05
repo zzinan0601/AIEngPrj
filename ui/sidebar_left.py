@@ -8,7 +8,7 @@ import streamlit as st
 import config
 
 
-@st.cache_data(ttl=60)
+@st.cache_resource   # 앱 전체에서 1회만 호출 (세션/rerun 무관)
 def get_ollama_models() -> list:
     """Ollama 서버에서 설치된 모델 목록을 가져온다. 실패 시 기본값 반환."""
     try:
@@ -64,7 +64,9 @@ def render_sidebar_left():
         st.session_state["selected_model"] = selected_model
 
         if st.button("🔄 목록 새로고침", use_container_width=True, key="refresh_models"):
-            st.cache_data.clear()
+            st.cache_resource.clear()
+            from rag.vector_store import warmup
+            warmup()
             _close_all_modals()
             st.rerun()
 
