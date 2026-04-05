@@ -27,6 +27,7 @@ def init_session_state():
         "doc_modal_view": "list",      # 문서 모달 내부 뷰: list | detail
         "doc_modal_file": None,        # 상세 볼 파일명
         "use_mcp": False,
+        "db_type": config.DB_TYPE,        # DB 타입 기본값 (.env 기준)
     }
     for key, value in defaults.items():
         if key not in st.session_state:
