@@ -296,28 +296,30 @@ def synthesize_node(state: GraphState) -> dict:
     llm = get_llm()
     logs = [_log("✨ 최종 답변 생성 중...")]
 
-    # 시스템 프롬프트 (UI 설정값 우선)
-    system_prompt = prompt_config.get(
-        "system_prompt",
-        "당신은 친절하고 정확한 AI 어시스턴트입니다. 한국어로 답변하세요.",
-    )
+    # 시스템 프롬프트 (UI 설정값 우선, 없으면 기본값)
+    system_prompt = prompt_config.get("system_prompt", "")
+    if not system_prompt.strip():
+        system_prompt = "You are a helpful AI assistant. Answer in Korean."
 
     messages = [SystemMessage(content=system_prompt)]
 
     # 퓨샷 예제 추가
     for fs in prompt_config.get("fewshots", []):
         messages.append(HumanMessage(content=fs["question"]))
-        # AIMessage 대신 HumanMessage prefix 방식으로 처리
         messages.append(SystemMessage(content=f"[예시 답변] {fs['answer']}"))
 
     # 사용자 질문 + 수집된 정보 구성
-    user_content = f"질문: {question}\n"
+    user_content = f"Question: {question}\n"
     if context:
-        user_content += f"\n[참고 문서]\n{context}\n"
+        user_content += f"\n[Reference Documents]\n{context}\n"
     if db_results:
-        user_content += f"\n[DB 조회 결과]\n{db_results}\n"
+        user_content += f"\n[DB Query Results]\n{db_results}\n"
     if context or db_results:
-        user_content += "\n위 정보를 참고하여 정확하게 답변해 주세요."
+        user_content += "\nPlease answer accurately based on the above information."
+
+    # llama3.1:8b 는 한국어 질문이 오면 시스템 프롬프트를 무시하고
+    # 한국어로 응답하는 경향이 있으므로 HumanMessage 끝에도 지시를 강제 삽입한다.
+    user_content += f"\n\n[Important] Follow this instruction strictly: {system_prompt}"
 
     messages.append(HumanMessage(content=user_content))
 
