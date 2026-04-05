@@ -30,6 +30,7 @@ def _run_graph(question: str, prompt_config: dict, use_mcp: bool) -> dict:
         "prompt_config": prompt_config,
         "use_mcp": use_mcp,
         "selected_model": st.session_state.get("selected_model", None),
+        "db_type": st.session_state.get("db_type", None),
     }
 
     graph = get_graph()
