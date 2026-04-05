@@ -15,20 +15,24 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from agent.state import GraphState, A2AMessage
 
-# LLM 싱글톤 (ollama 로컬)
-_llm = None
+# 모델명별 LLM 인스턴스 캐시 (여러 모델 동시 보관)
+_llm_cache: dict = {}
 
 
-def get_llm() -> ChatOllama:
-    """LLM 인스턴스를 싱글톤으로 반환"""
-    global _llm
-    if _llm is None:
-        _llm = ChatOllama(
-            model=config.LLM_MODEL,
+def get_llm(model_name: str = None) -> ChatOllama:
+    """
+    모델명별로 ChatOllama 인스턴스를 캐시하여 반환.
+    model_name 미지정 시 config.LLM_MODEL(기본값) 사용.
+    """
+    global _llm_cache
+    name = model_name or config.LLM_MODEL
+    if name not in _llm_cache:
+        _llm_cache[name] = ChatOllama(
+            model=name,
             base_url=config.OLLAMA_BASE_URL,
             temperature=0.1,
         )
-    return _llm
+    return _llm_cache[name]
 
 
 def _log(msg: str) -> str:
@@ -101,6 +105,7 @@ def router_node(state: GraphState) -> dict:
     """
     question = state["question"]
     docs_exist = _has_documents()
+    selected_model = state.get("selected_model") or config.LLM_MODEL
 
     # ── 우선순위 1: 명시적 문서 참조 키워드 감지 ──────────────────
     # "document를 참조해서", "문서에서", "파일 기반으로" 등이 있으면
@@ -122,7 +127,7 @@ def router_node(state: GraphState) -> dict:
         }
 
     # ── 우선순위 2: LLM 분류 ──────────────────────────────────────
-    llm = get_llm()
+    llm = get_llm(selected_model)
     system_prompt = """You are a routing classifier. Output ONLY one word from: rag, db, both, general
 
 Rules:
@@ -293,8 +298,9 @@ def synthesize_node(state: GraphState) -> dict:
     context = state.get("context", "")
     db_results = state.get("db_results", "")
     prompt_config = state.get("prompt_config", {})
-    llm = get_llm()
-    logs = [_log("✨ 최종 답변 생성 중...")]
+    selected_model = state.get("selected_model") or config.LLM_MODEL
+    llm = get_llm(selected_model)
+    logs = [_log(f"✨ 최종 답변 생성 중... (모델: {selected_model})")]
 
     # 시스템 프롬프트 (UI 설정값 우선, 없으면 기본값)
     system_prompt = prompt_config.get("system_prompt", "")
