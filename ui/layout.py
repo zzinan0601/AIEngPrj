@@ -10,7 +10,7 @@ import streamlit as st
 from ui.sidebar_left import render_sidebar_left
 from ui.chat import render_chat
 from ui.sidebar_right import render_sidebar_right
-from ui.modals import chunk_detail_modal, prompt_fewshot_modal
+from ui.modals import doc_management_modal, prompt_fewshot_modal
 
 
 def init_session_state():
@@ -19,13 +19,14 @@ def init_session_state():
     앱 최초 실행 또는 새 세션 시작 시 1회 실행된다.
     """
     defaults = {
-        "chat_history": [],          # 대화 기록 [{role, content, sql?}]
-        "logs": [],                  # 처리 흐름 로그 목록
-        "a2a_messages": [],          # A2A 메시지 목록
-        "show_chunk_modal": False,   # 청크 상세 모달 표시 여부
-        "show_prompt_modal": False,  # 프롬프트 관리 모달 표시 여부
-        "modal_file": None,          # 청크 모달에 표시할 파일명
-        "use_mcp": False,            # MCP 경유 여부
+        "chat_history": [],
+        "logs": [],
+        "a2a_messages": [],
+        "show_doc_modal": False,       # 문서 관리 모달
+        "show_prompt_modal": False,    # 프롬프트 관리 모달
+        "doc_modal_view": "list",      # 문서 모달 내부 뷰: list | detail
+        "doc_modal_file": None,        # 상세 볼 파일명
+        "use_mcp": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -49,12 +50,10 @@ def render_layout():
         render_sidebar_right()
 
     # ── 모달 팝업 처리 ────────────────────────────────────────────
-    # 청크 상세 모달
-    if st.session_state.get("show_chunk_modal") and st.session_state.get("modal_file"):
-        chunk_detail_modal(st.session_state["modal_file"])
-        st.session_state["show_chunk_modal"] = False
+    # @st.dialog 내부에서 st.rerun() 호출 시 모달이 닫히므로
+    # 플래그를 즉시 False로 바꾸지 않고, 모달 함수 자체가 닫힘을 관리한다.
+    if st.session_state.get("show_doc_modal"):
+        doc_management_modal()
 
-    # 프롬프트/퓨샷 관리 모달
     if st.session_state.get("show_prompt_modal"):
         prompt_fewshot_modal()
-        st.session_state["show_prompt_modal"] = False
