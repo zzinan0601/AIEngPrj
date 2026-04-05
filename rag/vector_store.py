@@ -1,12 +1,13 @@
 """
 rag/vector_store.py
 - Qdrant 로컬 DB 연결 및 CRUD 작업 모듈
-- qdrant-client를 직접 사용해 payload 구조를 완전 제어
-- 문서 컬렉션과 스키마 컬렉션을 분리 관리
+- 로컬 파일 경로 방식은 프로세스당 1개 인스턴스만 허용
+- @st.cache_resource 로 Streamlit 전체 세션에서 단일 클라이언트 공유
 """
 
 import uuid
 import config
+import streamlit as st
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -19,24 +20,20 @@ from qdrant_client.models import (
 )
 from rag.embeddings import embed_texts, embed_query
 
-_client: QdrantClient = None  # 싱글톤
 
-
+@st.cache_resource
 def get_client() -> QdrantClient:
-    """Qdrant 로컬 클라이언트 싱글톤 반환"""
-    global _client
-    if _client is None:
-        _client = QdrantClient(path=config.QDRANT_PATH)
-    return _client
+    """
+    Qdrant 로컬 클라이언트를 반환.
+    @st.cache_resource 로 앱 전체에서 단 1개 인스턴스만 생성·공유한다.
+    (로컬 파일 경로는 동시 접근 불가 → 싱글톤 필수)
+    """
+    return QdrantClient(path=config.QDRANT_PATH)
 
 
 def warmup():
-    """
-    앱 시작 시 클라이언트를 미리 초기화한다.
-    첫 사용자 요청 전에 호출해두면 모달 첫 오픈 시 지연 없음.
-    """
+    """앱 시작 시 클라이언트 + 기본 컬렉션을 미리 초기화"""
     try:
-        get_client()
         ensure_collection(config.COLLECTION_NAME)
         ensure_collection(config.SCHEMA_COLLECTION)
     except Exception:
