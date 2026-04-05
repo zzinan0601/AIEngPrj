@@ -69,6 +69,10 @@ def save_chunks(
     # 텍스트 → 벡터 변환
     vectors = embed_texts(chunks)
 
+    # 저장 시각 (한 번만 생성해서 모든 청크에 동일하게 기록)
+    from datetime import datetime
+    upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+
     # 포인트 리스트 생성
     points = [
         PointStruct(
@@ -79,6 +83,7 @@ def save_chunks(
                 "metadata": {
                     **metadata,
                     "chunk_index": i,
+                    "upload_date": upload_date,   # 등록일
                 },
             },
         )
@@ -138,27 +143,34 @@ def delete_by_filename(
 
 def get_file_list(collection_name: str = config.COLLECTION_NAME) -> list:
     """
-    저장된 파일 목록을 [{filename, chunks}] 형태로 반환.
-    파일명 기준으로 포인트 수를 집계.
+    저장된 파일 목록을 반환.
+    각 파일마다 {filename, chunks, file_size, upload_date} 포함.
     """
     try:
         ensure_collection(collection_name)
         client = get_client()
 
-        # 전체 포인트 스크롤 (limit은 충분히 크게)
         points, _ = client.scroll(
             collection_name=collection_name,
             with_payload=True,
             limit=50000,
         )
 
-        # 파일명별 청크 수 집계
+        # 파일명별 정보 집계
         file_map: dict = {}
         for point in points:
-            fname = point.payload.get("metadata", {}).get("filename", "unknown")
-            file_map[fname] = file_map.get(fname, 0) + 1
+            meta = point.payload.get("metadata", {})
+            fname = meta.get("filename", "unknown")
+            if fname not in file_map:
+                file_map[fname] = {
+                    "filename": fname,
+                    "chunks": 0,
+                    "file_size": meta.get("file_size", 0),    # bytes
+                    "upload_date": meta.get("upload_date", "-"),
+                }
+            file_map[fname]["chunks"] += 1
 
-        return [{"filename": k, "chunks": v} for k, v in sorted(file_map.items())]
+        return sorted(file_map.values(), key=lambda x: x["filename"])
     except Exception:
         return []
 
