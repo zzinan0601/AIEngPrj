@@ -78,8 +78,9 @@ def process_and_store(file_path: str, filename: str) -> int:
     chunks = split_documents(docs)
     chunk_texts = [c.page_content for c in chunks]
 
-    # 3. 임베딩 & 저장
-    metadata = {"filename": filename, "source": file_path}
+    # 3. 임베딩 & 저장 (file_size 포함)
+    file_size = os.path.getsize(file_path)
+    metadata = {"filename": filename, "source": file_path, "file_size": file_size}
     count = save_chunks(chunk_texts, metadata)
     return count
 
