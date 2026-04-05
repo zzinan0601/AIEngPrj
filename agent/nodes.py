@@ -235,7 +235,8 @@ def db_node(state: GraphState) -> dict:
     """
     question = state["question"]
     use_mcp = state.get("use_mcp", False)
-    logs = [_log("🗄️ DB 쿼리 생성·조회 시작")]
+    db_type = state.get("db_type") or config.DB_TYPE
+    logs = [_log(f"🗄️ DB 쿼리 생성·조회 시작 ({db_type})")]
 
     try:
         if use_mcp:
@@ -245,7 +246,7 @@ def db_node(state: GraphState) -> dict:
             logs.append(_log("🔌 MCP 경유 DB 조회 완료"))
         else:
             from agent.db_agent import generate_and_execute_query
-            sql, rows = generate_and_execute_query(question)
+            sql, rows = generate_and_execute_query(question, db_type)
             db_results = str(rows) if rows else "조회 결과 없음"
             logs.append(_log(f"✅ SQL 실행 완료 (결과 {len(rows) if isinstance(rows, list) else 0}행)"))
 
