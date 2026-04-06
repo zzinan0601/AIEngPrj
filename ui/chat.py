@@ -32,6 +32,12 @@ def _run_graph(question: str, prompt_config: dict, use_mcp: bool) -> dict:
         "use_mcp": use_mcp,
         "selected_model": st.session_state.get("selected_model", None),
         "db_type": st.session_state.get("db_type", None),
+        # 현재 질문 제외한 이전 대화만 전달 (현재 질문은 question 필드로 전달)
+        "chat_history": [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.get("chat_history", [])
+            if m["role"] in ("user", "assistant")
+        ],
     }
 
     graph = get_graph()
