@@ -61,3 +61,6 @@ class GraphState(TypedDict):
 
     # 선택된 DB 타입: sqlite | postgresql | oracle
     db_type: Optional[str]
+
+    # 이전 대화 기록 [{role, content}, ...] - 슬라이딩 윈도우 적용
+    chat_history: List[dict]
