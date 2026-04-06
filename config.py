@@ -72,6 +72,10 @@ MCP_SERVER_PORT: int = int(os.getenv("MCP_SERVER_PORT", "8765"))
 # ── 에이전트 루프 ─────────────────────────────
 MAX_ITERATIONS: int = int(os.getenv("MAX_ITERATIONS", "3"))
 
+# ── 대화 메모리 ───────────────────────────────
+# 0 이면 메모리 비활성화, 최근 N턴만 LLM에 전달 (슬라이딩 윈도우)
+MEMORY_TURNS: int = int(os.getenv("MEMORY_TURNS", "10"))
+
 
 def init_data_dirs():
     """데이터 디렉토리를 자동으로 생성"""
