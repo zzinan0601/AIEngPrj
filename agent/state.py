@@ -29,6 +29,9 @@ class GraphState(TypedDict):
     # RAG 검색 결과 (문서 컨텍스트)
     context: str
 
+    # RAG 출처 목록 [{filename, chunk_index}, ...]
+    sources: Annotated[List[dict], operator.add]
+
     # DB 조회 결과
     db_results: str
 
