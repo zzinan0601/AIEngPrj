@@ -21,6 +21,7 @@ def _run_graph(question: str, prompt_config: dict, use_mcp: bool) -> dict:
         "question": question,
         "route": "",
         "context": "",
+        "sources": [],
         "db_results": "",
         "generated_sql": "",
         "answer": "",
