@@ -114,20 +114,27 @@ def search_documents(
     쿼리 벡터로 유사 문서 검색.
 
     Returns:
-        텍스트 청크 문자열 목록
+        [{"text": str, "filename": str, "chunk_index": int}, ...] 목록
     """
     ensure_collection(collection_name)
     client = get_client()
 
     query_vector = embed_query(query)
-    # qdrant-client >= 1.7.0 : search() 폐기 → query_points() 사용
     response = client.query_points(
         collection_name=collection_name,
         query=query_vector,
         limit=top_k,
         with_payload=True,
     )
-    return [r.payload.get("page_content", "") for r in response.points]
+    results = []
+    for r in response.points:
+        meta = r.payload.get("metadata", {})
+        results.append({
+            "text":        r.payload.get("page_content", ""),
+            "filename":    meta.get("filename", "unknown"),
+            "chunk_index": meta.get("chunk_index", 0),
+        })
+    return results
 
 
 def delete_by_filename(
