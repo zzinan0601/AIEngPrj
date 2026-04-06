@@ -314,17 +314,30 @@ def synthesize_node(state: GraphState) -> dict:
     llm = get_llm(selected_model)
     logs = [_log(f"✨ 최종 답변 생성 중... (모델: {selected_model})")]
 
-    # 시스템 프롬프트 (UI 설정값 우선, 없으면 기본값)
+    # 시스템 프롬프트
     system_prompt = prompt_config.get("system_prompt", "")
     if not system_prompt.strip():
         system_prompt = "You are a helpful AI assistant. Answer in Korean."
 
     messages = [SystemMessage(content=system_prompt)]
 
-    # 퓨샷 예제 추가
+    # 퓨샷 예제
     for fs in prompt_config.get("fewshots", []):
         messages.append(HumanMessage(content=fs["question"]))
         messages.append(SystemMessage(content=f"[예시 답변] {fs['answer']}"))
+
+    # 이전 대화 기록 주입 (슬라이딩 윈도우)
+    history = state.get("chat_history", [])
+    if history and config.MEMORY_TURNS > 0:
+        # 최근 N턴 = 최근 N*2개 메시지 (질문+답변 쌍)
+        window = history[-(config.MEMORY_TURNS * 2):]
+        for h in window:
+            if h["role"] == "user":
+                messages.append(HumanMessage(content=h["content"]))
+            else:
+                # AIMessage 대신 SystemMessage prefix로 처리
+                messages.append(SystemMessage(content=f"[이전 답변] {h['content']}"))
+        logs.append(_log(f"🧠 대화 기억 {len(window)//2}턴 주입 (최대 {config.MEMORY_TURNS}턴)"))
 
     # 사용자 질문 + 수집된 정보 구성
     user_content = f"Question: {question}\n"
