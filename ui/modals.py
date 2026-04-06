@@ -10,7 +10,8 @@ import streamlit as st
 import config
 
 from rag.vector_store import get_file_list, get_file_chunks, delete_by_filename
-from rag.pipeline import process_and_storefrom ui.prompt_manager import (
+from rag.pipeline import process_and_store
+from ui.prompt_manager import (
     load_prompt_config,
     update_system_prompt,
     add_fewshot,
