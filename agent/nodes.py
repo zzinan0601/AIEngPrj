@@ -193,27 +193,35 @@ def rag_node(state: GraphState) -> dict:
 
     try:
         if use_mcp:
-            # MCP 경유 검색
             from mcp.mcp_client import search_via_mcp
             raw = search_via_mcp(question)
-            results = [raw] if raw else []
+            results = [{"text": raw, "filename": "MCP", "chunk_index": 0}] if raw else []
             logs.append(_log("🔌 MCP 경유 검색 완료"))
         else:
-            # 직접 RAG 파이프라인 호출
             from rag.pipeline import search_and_rerank
             results = search_and_rerank(question)
 
         if results:
             context = "\n\n---\n\n".join(
-                [f"[문서 {i+1}]\n{r}" for i, r in enumerate(results)]
+                [f"[문서 {i+1}]\n{r['text']}" for i, r in enumerate(results)]
             )
+            # 출처 목록: 중복 제거 후 순서 유지
+            seen = set()
+            sources = []
+            for r in results:
+                key = (r["filename"], r["chunk_index"])
+                if key not in seen:
+                    seen.add(key)
+                    sources.append(r)
             logs.append(_log(f"✅ {len(results)}개 청크 검색·재정렬 완료"))
         else:
             context = ""
+            sources = []
             logs.append(_log("⚠️ 관련 문서를 찾지 못했습니다"))
 
     except Exception as e:
         context = ""
+        sources = []
         logs.append(_log(f"❌ RAG 오류: {str(e)}"))
 
     # A2A: RAG → Synthesize 에 컨텍스트 전달
@@ -224,7 +232,7 @@ def rag_node(state: GraphState) -> dict:
         "msg_type": "response",
     }
 
-    return {"context": context, "logs": logs, "a2a_messages": [a2a_msg]}
+    return {"context": context, "sources": sources, "logs": logs, "a2a_messages": [a2a_msg]}
 
 
 # ── 3. DB 노드 ────────────────────────────────────────────────────────────
@@ -333,6 +341,22 @@ def synthesize_node(state: GraphState) -> dict:
     try:
         response = llm.invoke(messages)
         answer = response.content
+
+        # 출처가 있으면 답변 뒤에 추가
+        sources = state.get("sources", [])
+        if sources:
+            seen = set()
+            source_lines = []
+            for s in sources:
+                fname = s.get("filename", "")
+                cidx  = s.get("chunk_index", 0)
+                key   = (fname, cidx)
+                if key not in seen and fname:
+                    seen.add(key)
+                    source_lines.append(f"- {fname}  (청크 {cidx + 1})")
+            if source_lines:
+                answer += "\n\n---\n**📚 출처**\n" + "\n".join(source_lines)
+
         logs.append(_log("✅ 답변 생성 완료"))
     except Exception as e:
         answer = f"답변 생성 중 오류가 발생했습니다: {str(e)}"
