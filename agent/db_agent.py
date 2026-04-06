@@ -119,7 +119,7 @@ def get_schema_from_vector(question: str) -> str:
             question, top_k=3, collection_name=config.SCHEMA_COLLECTION
         )
         if results:
-            return "\n".join(results)
+            return "\n".join([r["text"] for r in results])
     except Exception:
         pass
     return get_db_schema()
@@ -136,18 +136,28 @@ def clean_sql(raw_sql: str) -> str:
     return match.group(1).strip() if match else sql.strip()
 
 
-def generate_sql(question: str, schema_context: str, db_type: str = None) -> str:
-    """LLM을 이용해 자연어 → SQL 변환 (DB 타입별 문법 안내 포함)"""
+def generate_sql(question: str, schema_context: str,
+                 db_type: str = None, rag_context: str = "") -> str:
+    """LLM을 이용해 자연어 → SQL 변환 (DB 타입별 문법 + RAG 컨텍스트 참조)"""
     t = (db_type or config.DB_TYPE).lower()
     dialect = {"postgresql": "PostgreSQL", "oracle": "Oracle", "sqlite": "SQLite"}.get(t, "SQLite")
 
     llm = get_llm()
+
+    # RAG 결과가 있으면 SQL 생성 힌트로 추가 (토큰 절약을 위해 1500자 제한)
+    rag_section = ""
+    if rag_context.strip():
+        rag_section = f"""
+[참고 문서 내용 - 테이블명·컬럼값 힌트로 활용]
+{rag_context[:1500]}
+"""
+
     system_prompt = f"""당신은 {dialect} SQL 전문가입니다.
 아래 DB 스키마를 참고하여 질문에 맞는 SELECT SQL 쿼리를 생성하세요.
 
 [DB 스키마]
 {schema_context}
-
+{rag_section}
 규칙:
 - SELECT 문만 생성 (INSERT/UPDATE/DELETE 금지)
 - {dialect} 문법 사용
@@ -176,15 +186,16 @@ def execute_sql(sql: str, db_type: str = None) -> list:
 
 
 # ── 통합 함수 ─────────────────────────────────────────────────────────
-def generate_and_execute_query(question: str, db_type: str = None) -> tuple:
+def generate_and_execute_query(question: str, db_type: str = None,
+                               rag_context: str = "") -> tuple:
     """
     질문 → SQL 생성 → 실행 → 결과 반환.
-    db_type 미지정 시 config.DB_TYPE 사용.
+    rag_context: both 경로에서 RAG 결과를 SQL 생성 시 참조.
     Returns: (sql 문자열, 결과 rows 리스트)
     """
     t = db_type or config.DB_TYPE
     schema = get_schema_from_vector(question)
-    sql = generate_sql(question, schema, t)
+    sql = generate_sql(question, schema, t, rag_context)
     rows = execute_sql(sql, t)
     return sql, rows
 
