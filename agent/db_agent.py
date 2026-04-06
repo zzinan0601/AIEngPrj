@@ -203,18 +203,27 @@ def generate_and_execute_query(question: str, db_type: str = None,
 def embed_db_schema(db_type: str = None):
     """
     현재 DB 스키마를 Qdrant 스키마 컬렉션에 임베딩하여 저장.
-    db_type 미지정 시 config.DB_TYPE 사용.
+    filename을 "db_schema_{db_type}" 으로 저장해 DB별 구분 가능.
     """
-    from rag.vector_store import save_chunks
+    from rag.vector_store import save_chunks, delete_by_filename
 
-    schema_text = get_db_schema(db_type)
+    t = (db_type or config.DB_TYPE).lower()
+    filename = f"db_schema_{t}"   # 예: db_schema_sqlite, db_schema_postgresql
+
+    schema_text = get_db_schema(t)
     if "DB 테이블 없음" in schema_text or "실패" in schema_text:
         return 0, schema_text
+
+    # 같은 DB 타입의 기존 임베딩 삭제 후 재저장 (중복 누적 방지)
+    try:
+        delete_by_filename(filename, collection_name=config.SCHEMA_COLLECTION)
+    except Exception:
+        pass
 
     chunks = [c for c in schema_text.splitlines() if c.strip()]
     count = save_chunks(
         chunks=chunks,
-        metadata={"source": "db_schema", "filename": "db_schema"},
+        metadata={"source": "db_schema", "filename": filename, "db_type": t},
         collection_name=config.SCHEMA_COLLECTION,
     )
     return count, schema_text
