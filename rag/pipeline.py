@@ -89,17 +89,17 @@ def search_and_rerank(query: str) -> list:
     """
     벡터 검색 → reranker 재정렬 파이프라인.
 
-    Args:
-        query: 검색 질문
-
     Returns:
-        재정렬된 상위 문서 텍스트 목록
+        [{"text": str, "filename": str, "chunk_index": int}, ...] 목록
     """
-    # 1. 벡터 유사도 검색 (TOP_K개)
     initial_results = search_documents(query, top_k=config.TOP_K)
-
     if not initial_results:
         return []
 
-    # 2. bge-reranker로 재정렬 (RERANK_TOP_K개)
-    return rerank(query, initial_results)
+    # reranker는 텍스트만 처리 → 텍스트 추출 후 재정렬 → 원본 dict 복원
+    texts = [r["text"] for r in initial_results]
+    reranked_texts = rerank(query, texts)
+
+    # 재정렬된 텍스트 순서에 맞게 원본 dict 재정렬
+    text_to_meta = {r["text"]: r for r in initial_results}
+    return [text_to_meta[t] for t in reranked_texts if t in text_to_meta]
