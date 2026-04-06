@@ -10,8 +10,7 @@ import streamlit as st
 import config
 
 from rag.vector_store import get_file_list, get_file_chunks, delete_by_filename
-from rag.pipeline import process_and_store
-from ui.prompt_manager import (
+from rag.pipeline import process_and_storefrom ui.prompt_manager import (
     load_prompt_config,
     update_system_prompt,
     add_fewshot,
@@ -47,6 +46,16 @@ def _cb_delete_file(fname: str):
         delete_by_filename(fname)
         st.session_state["logs"].append(f"🗑️ 파일 삭제: {fname}")
         st.session_state["_modal_msg"] = ("success", f"'{fname}' 삭제 완료")
+    except Exception as e:
+        st.session_state["_modal_msg"] = ("error", f"삭제 실패: {str(e)}")
+
+def _cb_delete_schema(fname: str):
+    """DB 스키마 임베딩 삭제 (schema 컬렉션)"""
+    try:
+        delete_by_filename(fname, collection_name=config.SCHEMA_COLLECTION)
+        db_tag = fname.replace("db_schema_", "").upper()
+        st.session_state["logs"].append(f"🗑️ DB 스키마 삭제: {db_tag}")
+        st.session_state["_modal_msg"] = ("success", f"{db_tag} 스키마 삭제 완료")
     except Exception as e:
         st.session_state["_modal_msg"] = ("error", f"삭제 실패: {str(e)}")
 
@@ -146,7 +155,9 @@ def doc_management_modal():
         return
 
     # ── 목록·업로드 화면 ─────────────────────────────────────────────
-    tab_upload, tab_list = st.tabs(["⬆️ 파일 업로드", "📋 저장된 파일"])
+    tab_upload, tab_list, tab_schema = st.tabs(
+        ["⬆️ 파일 업로드", "📋 저장된 파일", "🗄️ DB 스키마 현황"]
+    )
 
     with tab_upload:
         st.file_uploader(
@@ -213,6 +224,63 @@ def doc_management_modal():
                         on_click=_cb_delete_file,
                         args=(fname,),
                     )
+
+    # ── DB 스키마 현황 탭 ─────────────────────────────────────────────
+    with tab_schema:
+        try:
+            schema_list = get_file_list(collection_name=config.SCHEMA_COLLECTION)
+        except Exception as e:
+            st.error(f"스키마 목록 조회 오류: {str(e)}")
+            return
+
+        # db_schema_{type} 형식만 필터링
+        schema_list = [
+            f for f in schema_list
+            if f["filename"].startswith("db_schema_")
+        ]
+
+        if not schema_list:
+            st.info("임베딩된 DB 스키마가 없습니다.\n사이드바의 'DB 스키마 임베딩' 버튼으로 등록하세요.")
+        else:
+            st.caption(f"총 {len(schema_list)}개 DB 스키마 임베딩됨")
+
+            # DB 타입별 섹션
+            for f_info in schema_list:
+                fname  = f_info["filename"]                  # db_schema_sqlite 등
+                db_tag = fname.replace("db_schema_", "").upper()  # SQLITE 등
+                chunks = f_info["chunks"]
+                date   = f_info.get("upload_date", "-")
+
+                # 헤더 행
+                h0, h1, h2 = st.columns([4, 2, 1])
+                with h0:
+                    st.markdown(
+                        f"<span style='font-size:13px;font-weight:600'>"
+                        f"🗄️ {db_tag}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with h1:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:#888;padding-top:4px'>"
+                        f"청크 {chunks}개 · {date}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with h2:
+                    st.button(
+                        "🗑", key=f"del_schema_{fname}", help=f"{db_tag} 스키마 삭제",
+                        on_click=_cb_delete_schema,
+                        args=(fname,),
+                    )
+
+                # 청크 상세 (expander)
+                with st.expander(f"{db_tag} 스키마 내용 보기"):
+                    schema_chunks = get_file_chunks(
+                        fname, collection_name=config.SCHEMA_COLLECTION
+                    )
+                    for i, chunk in enumerate(schema_chunks):
+                        st.code(chunk, language="sql")
+
+                st.divider()
 
 
 # ── 프롬프트 / 퓨샷 관리 모달 ─────────────────────────────────────────
