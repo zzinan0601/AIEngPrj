@@ -137,14 +137,18 @@ def clean_sql(raw_sql: str) -> str:
 
 
 def generate_sql(question: str, schema_context: str,
-                 db_type: str = None, rag_context: str = "") -> str:
-    """LLM을 이용해 자연어 → SQL 변환 (DB 타입별 문법 + RAG 컨텍스트 참조)"""
+                 db_type: str = None, rag_context: str = "",
+                 chat_history: list = None) -> str:
+    """LLM을 이용해 자연어 → SQL 변환.
+    rag_context  : RAG 검색 결과 (테이블 값 힌트)
+    chat_history : 이전 대화 기록 (값·조건·기간 등 힌트 추출)
+    """
     t = (db_type or config.DB_TYPE).lower()
-    dialect = {"postgresql": "PostgreSQL", "oracle": "Oracle", "sqlite": "SQLite"}.get(t, "SQLite")
-
+    dialect = {"postgresql": "PostgreSQL", "oracle": "Oracle",
+               "sqlite": "SQLite"}.get(t, "SQLite")
     llm = get_llm()
 
-    # RAG 결과가 있으면 SQL 생성 힌트로 추가 (토큰 절약을 위해 1500자 제한)
+    # RAG 컨텍스트 섹션
     rag_section = ""
     if rag_context.strip():
         rag_section = f"""
@@ -152,15 +156,30 @@ def generate_sql(question: str, schema_context: str,
 {rag_context[:1500]}
 """
 
+    # 이전 대화 섹션 (최근 6턴만, 값·조건 힌트 목적)
+    history_section = ""
+    if chat_history:
+        recent = chat_history[-12:]   # 최근 6턴 = 12 메시지
+        lines = []
+        for h in recent:
+            role = "사용자" if h["role"] == "user" else "AI"
+            # content가 길면 앞 200자만 (토큰 절약)
+            lines.append(f"{role}: {h['content'][:200]}")
+        history_section = f"""
+[이전 대화 기록 - 날짜·값·조건 등 힌트 참조]
+{chr(10).join(lines)}
+"""
+
     system_prompt = f"""당신은 {dialect} SQL 전문가입니다.
 아래 DB 스키마를 참고하여 질문에 맞는 SELECT SQL 쿼리를 생성하세요.
 
 [DB 스키마]
 {schema_context}
-{rag_section}
+{rag_section}{history_section}
 규칙:
 - SELECT 문만 생성 (INSERT/UPDATE/DELETE 금지)
 - {dialect} 문법 사용
+- 이전 대화에서 언급된 날짜·값·이름·조건을 WHERE 절에 적극 활용
 - SQL만 출력 (설명 없이)"""
 
     response = llm.invoke([
@@ -187,15 +206,17 @@ def execute_sql(sql: str, db_type: str = None) -> list:
 
 # ── 통합 함수 ─────────────────────────────────────────────────────────
 def generate_and_execute_query(question: str, db_type: str = None,
-                               rag_context: str = "") -> tuple:
+                               rag_context: str = "",
+                               chat_history: list = None) -> tuple:
     """
     질문 → SQL 생성 → 실행 → 결과 반환.
-    rag_context: both 경로에서 RAG 결과를 SQL 생성 시 참조.
+    rag_context  : both 경로에서 RAG 결과를 SQL 생성 시 참조.
+    chat_history : 이전 대화에서 값·조건 힌트 추출.
     Returns: (sql 문자열, 결과 rows 리스트)
     """
     t = db_type or config.DB_TYPE
     schema = get_schema_from_vector(question)
-    sql = generate_sql(question, schema, t, rag_context)
+    sql = generate_sql(question, schema, t, rag_context, chat_history or [])
     rows = execute_sql(sql, t)
     return sql, rows
 
