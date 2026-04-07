@@ -241,10 +241,12 @@ def db_node(state: GraphState) -> dict:
     LLM으로 SQL을 생성한 뒤 SQLite DB를 실제로 조회한다.
     use_mcp=True 이면 MCP 서버를 경유한다.
     """
-    question = state["question"]
-    use_mcp  = state.get("use_mcp", False)
-    db_type  = state.get("db_type") or config.DB_TYPE
-    rag_context = state.get("context", "")   # both 경로에서 RAG 결과 참조
+    question    = state["question"]
+    use_mcp     = state.get("use_mcp", False)
+    db_type     = state.get("db_type") or config.DB_TYPE
+    rag_context = state.get("context", "")
+    # 이전 대화에서 값·조건 힌트 추출을 위해 chat_history 전달
+    chat_history = state.get("chat_history", [])
     logs = [_log(f"🗄️ DB 쿼리 생성·조회 시작 ({db_type})")]
 
     try:
@@ -255,11 +257,15 @@ def db_node(state: GraphState) -> dict:
             logs.append(_log("🔌 MCP 경유 DB 조회 완료"))
         else:
             from agent.db_agent import generate_and_execute_query
-            sql, rows = generate_and_execute_query(question, db_type, rag_context)
+            sql, rows = generate_and_execute_query(
+                question, db_type, rag_context, chat_history
+            )
             db_results = str(rows) if rows else "조회 결과 없음"
             logs.append(_log(f"✅ SQL 실행 완료 (결과 {len(rows) if isinstance(rows, list) else 0}행)"))
             if rag_context:
                 logs.append(_log("📚 RAG 컨텍스트를 SQL 생성에 참조했습니다"))
+            if chat_history:
+                logs.append(_log("🧠 이전 대화를 SQL 생성에 참조했습니다"))
 
     except Exception as e:
         sql = ""
