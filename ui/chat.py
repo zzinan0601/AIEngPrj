@@ -10,6 +10,52 @@ import streamlit as st
 from ui.prompt_manager import load_prompt_config
 
 
+def _render_chart(chart_config: dict):
+    """
+    chart_config 에 따라 plotly 차트를 렌더링.
+    plotly 없으면 streamlit 기본 차트로 폴백.
+    """
+    import pandas as pd
+
+    chart_type = chart_config.get("type", "bar")
+    title      = chart_config.get("title", "")
+    x_labels   = chart_config.get("x_labels", [])
+    series     = chart_config.get("series", [])
+    summary    = chart_config.get("summary", "")
+
+    try:
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        for s in series:
+            name   = s.get("name", "")
+            values = s.get("values", [])
+            if chart_type == "bar":
+                fig.add_trace(go.Bar(x=x_labels, y=values, name=name))
+            elif chart_type == "line":
+                fig.add_trace(go.Scatter(x=x_labels, y=values, name=name, mode="lines+markers"))
+            elif chart_type == "pie":
+                fig.add_trace(go.Pie(labels=x_labels, values=values, name=name))
+            elif chart_type == "scatter":
+                fig.add_trace(go.Scatter(x=x_labels, y=values, name=name, mode="markers"))
+
+        fig.update_layout(title=title, height=400)
+        st.plotly_chart(fig, use_container_width=True)
+
+    except ImportError:
+        # plotly 없으면 st 기본 차트로 폴백
+        if series and x_labels:
+            df_data = {s["name"]: s["values"] for s in series}
+            df = pd.DataFrame(df_data, index=x_labels)
+            if chart_type == "line":
+                st.line_chart(df)
+            else:
+                st.bar_chart(df)
+
+    if summary:
+        st.caption(f"📊 {summary}")
+
+
 def _run_graph(question: str, prompt_config: dict, use_mcp: bool) -> dict:
     """
     LangGraph 그래프를 실행하고 결과 state를 반환.
@@ -32,7 +78,8 @@ def _run_graph(question: str, prompt_config: dict, use_mcp: bool) -> dict:
         "use_mcp": use_mcp,
         "selected_model": st.session_state.get("selected_model", None),
         "db_type": st.session_state.get("db_type", None),
-        # 현재 질문 제외한 이전 대화만 전달 (현재 질문은 question 필드로 전달)
+        "chart_request": False,
+        "chart_config": None,
         "chat_history": [
             {"role": m["role"], "content": m["content"]}
             for m in st.session_state.get("chat_history", [])
@@ -54,7 +101,11 @@ def render_chat():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-            # DB 노드가 실행됐으면 SQL도 표시
+            # 이전 차트 재렌더링
+            if msg.get("chart_config"):
+                _render_chart(msg["chart_config"])
+
+            # 이전 SQL 표시
             if msg.get("sql"):
                 with st.expander("🗄️ 실행된 SQL", expanded=False):
                     st.code(msg["sql"], language="sql")
@@ -85,35 +136,40 @@ def render_chat():
             result = _run_graph(user_input, prompt_config, use_mcp)
 
             answer = result.get("answer", "답변을 생성할 수 없습니다.")
-            logs = result.get("logs", [])
-            a2a_msgs = result.get("a2a_messages", [])
-            sql = result.get("generated_sql", "")
-            route = result.get("route", "")
-            context = result.get("context", "")
+            logs        = result.get("logs", [])
+            a2a_msgs    = result.get("a2a_messages", [])
+            sql         = result.get("generated_sql", "")
+            route       = result.get("route", "")
+            context     = result.get("context", "")
+            chart_config = result.get("chart_config")
 
-            # 답변 표시
             status_placeholder.empty()
 
-            # 라우팅 경로 + 컨텍스트 확인 뱃지 (맨 위에 표시)
+            # 라우팅 경로 뱃지
             if route:
-                route_emoji = {"rag": "📚", "db": "🗄️", "both": "📚🗄️", "general": "💬"}.get(route, "")
+                route_emoji = {"rag":"📚","db":"🗄️","both":"📚🗄️","general":"💬"}.get(route,"")
                 if route == "rag" and not context:
-                    st.warning("⚠️ 문서를 검색했지만 관련 내용을 찾지 못했습니다. 문서가 정상적으로 업로드·저장됐는지 확인하세요.")
+                    st.warning("⚠️ 문서를 검색했지만 관련 내용을 찾지 못했습니다.")
                 else:
                     st.caption(f"{route_emoji} 처리 경로: **{route.upper()}**")
 
             st.markdown(answer)
 
-            # SQL 표시 (DB 경로인 경우)
+            # ── 차트 렌더링 ─────────────────────────────────────────
+            if chart_config and chart_config.get("type") != "none":
+                _render_chart(chart_config)
+
+            # SQL 표시
             if sql and sql not in ("", "(MCP 경유)"):
                 with st.expander("🗄️ 실행된 SQL", expanded=False):
                     st.code(sql, language="sql")
 
             # 세션 상태 업데이트
             st.session_state["chat_history"].append({
-                "role": "assistant",
-                "content": answer,
-                "sql": sql,
+                "role":         "assistant",
+                "content":      answer,
+                "sql":          sql,
+                "chart_config": chart_config,   # 재표시를 위해 저장
             })
             st.session_state["logs"] = st.session_state.get("logs", []) + logs
             st.session_state["a2a_messages"] = (
