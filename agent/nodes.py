@@ -121,6 +121,7 @@ def router_node(state: GraphState) -> dict:
         }
         return {
             "route": route,
+            "chart_request": _is_chart_request(question),
             "logs": [log_msg],
             "a2a_messages": [a2a_msg],
             "iteration": state.get("iteration", 0),
@@ -175,6 +176,7 @@ Output ONLY the single word. No explanation."""
 
     return {
         "route": route,
+        "chart_request": _is_chart_request(question),
         "logs": [_log(f"🔀 라우팅 결정: [{route.upper()}]")],
         "a2a_messages": [a2a_msg],
         "iteration": state.get("iteration", 0),
@@ -385,3 +387,100 @@ def synthesize_node(state: GraphState) -> dict:
         logs.append(_log(f"❌ 생성 오류: {str(e)}"))
 
     return {"answer": answer, "logs": logs}
+
+
+# ── 차트 감지 헬퍼 ────────────────────────────────────────────────────────
+_CHART_KEYWORDS = [
+    # 한국어
+    "차트", "그래프", "그려", "시각화", "플롯", "막대", "선그래프",
+    "파이차트", "분포", "추이", "트렌드", "히스토그램",
+    # 영어
+    "chart", "graph", "plot", "visualize", "bar chart", "line chart",
+    "pie chart", "histogram", "trend", "distribution",
+]
+
+def _is_chart_request(question: str) -> bool:
+    """질문에 차트/시각화 키워드가 있으면 True"""
+    q = question.lower()
+    return any(kw in q for kw in _CHART_KEYWORDS)
+
+
+# ── 6. Chart 노드 ─────────────────────────────────────────────────────────
+def chart_node(state: GraphState) -> dict:
+    """
+    RAG 컨텍스트 또는 DB 결과를 분석해 차트 설정(JSON)을 생성.
+    LLM 에게 JSON 형식만 출력하도록 강제한 뒤 파싱한다.
+
+    chart_config 구조:
+    {
+      "type"    : "bar" | "line" | "pie" | "scatter",
+      "title"   : "차트 제목",
+      "x_labels": ["1월","2월",...],
+      "series"  : [{"name":"매출", "values":[100,200,...]}],
+      "summary" : "텍스트 요약 (차트 아래 표시)"
+    }
+    """
+    import json
+    import re
+
+    question     = state["question"]
+    context      = state.get("context", "")
+    db_results   = state.get("db_results", "")
+    selected_model = state.get("selected_model") or config.LLM_MODEL
+    llm = get_llm(selected_model)
+    logs = [_log("📊 차트 설정 생성 중...")]
+
+    # 데이터 소스 결정
+    data_source = ""
+    if db_results and db_results != "조회 결과 없음":
+        data_source = f"[DB 조회 결과]\n{db_results}"
+    elif context:
+        data_source = f"[문서 내용]\n{context[:2000]}"
+
+    if not data_source:
+        logs.append(_log("⚠️ 차트 생성에 사용할 데이터가 없습니다"))
+        return {"chart_config": None, "logs": logs}
+
+    system_prompt = """You are a data visualization expert.
+Analyze the given data and generate chart configuration as JSON.
+Output ONLY valid JSON, no explanation, no markdown code block.
+
+JSON structure:
+{
+  "type": "bar" or "line" or "pie" or "scatter",
+  "title": "chart title in Korean",
+  "x_labels": ["label1", "label2", ...],
+  "series": [{"name": "series name", "values": [number, number, ...]}],
+  "summary": "one sentence summary in Korean"
+}
+
+Rules:
+- values must be numbers only
+- x_labels and values must have same length
+- choose chart type that best fits the data
+- if data cannot be visualized, return {"type": "none", "summary": "이유"}"""
+
+    user_content = f"질문: {question}\n\n{data_source}"
+
+    try:
+        response = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_content),
+        ])
+        raw = response.content.strip()
+
+        # 마크다운 코드블록 제거
+        raw = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
+
+        chart_config = json.loads(raw)
+
+        if chart_config.get("type") == "none":
+            logs.append(_log(f"⚠️ 차트 생성 불가: {chart_config.get('summary','')}"))
+            return {"chart_config": None, "logs": logs}
+
+        logs.append(_log(f"✅ 차트 생성 완료: {chart_config.get('type')} - {chart_config.get('title')}"))
+        return {"chart_config": chart_config, "logs": logs}
+
+    except Exception as e:
+        logs.append(_log(f"❌ 차트 생성 오류: {str(e)}"))
+        return {"chart_config": None, "logs": logs}
