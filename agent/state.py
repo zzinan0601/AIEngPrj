@@ -64,3 +64,10 @@ class GraphState(TypedDict):
 
     # 이전 대화 기록 [{role, content}, ...] - 슬라이딩 윈도우 적용
     chat_history: List[dict]
+
+    # 차트 요청 여부 (질문에 차트/그래프 키워드 감지)
+    chart_request: bool
+
+    # 차트 설정 (chart_node가 생성, UI에서 렌더링)
+    # {type, title, x_labels, series:[{name,values}], summary}
+    chart_config: Optional[dict]
