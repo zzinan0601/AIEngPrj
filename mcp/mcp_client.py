@@ -148,16 +148,70 @@ def list_mcp_tools() -> list:
 def test_mcp_connection() -> dict:
     """
     MCP 연결 및 도구 호출 테스트.
-    UI 또는 콘솔에서 직접 호출해 결과 확인 가능.
     예: from mcp.mcp_client import test_mcp_connection; print(test_mcp_connection())
     """
-    result = {"tools": [], "test_call": "", "error": ""}
+    import json
+
+    result = {
+        "tools":        [],
+        "test_tool":    "",
+        "test_call":    "",
+        "raw_result":   "",   # content 원시 구조
+        "error":        "",
+    }
     try:
+        # 1. 도구 목록 확인
         result["tools"] = list_mcp_tools()
-        if result["tools"]:
-            # 첫 번째 도구로 테스트 호출
-            first_tool = result["tools"][0]["name"]
-            result["test_call"] = call_tool(first_tool, {})
+        print(f"[MCP TEST] 도구 목록: {result['tools']}")
+
+        if not result["tools"]:
+            result["error"] = "도구 목록이 비어있음 - 서버 연결 실패 가능성"
+            return result
+
+        # 2. search_documents 로 테스트 (query 인자 포함)
+        result["test_tool"] = "search_documents"
+        raw = _run_in_new_loop(
+            _call_tool_async_debug("search_documents", {"query": "테스트"})
+        )
+        result["test_call"] = raw.get("text", "")
+        result["raw_result"] = raw.get("raw", "")
+        print(f"[MCP TEST] raw 결과: {result['raw_result'][:300]}")
+
     except Exception as e:
         result["error"] = str(e)
+        print(f"[MCP TEST] 오류: {e}")
+
     return result
+
+
+async def _call_tool_async_debug(tool_name: str, arguments: dict) -> dict:
+    """디버그용 - raw result 구조까지 반환"""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[_SERVER_SCRIPT],
+        env=None,
+    )
+
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments=arguments)
+
+            raw_str = str(result)
+            print(f"[MCP DEBUG] result type : {type(result)}")
+            print(f"[MCP DEBUG] result raw  : {raw_str[:500]}")
+            print(f"[MCP DEBUG] isError     : {getattr(result, 'isError', 'N/A')}")
+
+            content = getattr(result, "content", None)
+            if content:
+                print(f"[MCP DEBUG] content len : {len(content)}")
+                for i, item in enumerate(content):
+                    print(f"[MCP DEBUG] content[{i}] type: {type(item)}, text: {str(getattr(item,'text',''))[:200]}")
+
+            return {
+                "text": _extract_text(result),
+                "raw":  raw_str,
+            }
