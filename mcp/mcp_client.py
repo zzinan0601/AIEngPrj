@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 # 프로젝트 루트 경로
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SERVER_SCRIPT = os.path.join(_PROJECT_ROOT, "mcp", "mcp_server.py")
+_SERVER_SCRIPT = os.path.join(_PROJECT_ROOT, "call_mcp", "mcp_server.py")
 
 
 def _run_in_new_loop(coro):
     """
     새 이벤트 루프를 가진 스레드에서 async 코루틴을 실행.
-    Streamlit 등 이미 이벤트 루프가 있는 환경에서도 안전하게 동작.
+    Python 3.11+ ExceptionGroup (TaskGroup cleanup 에러) 안전 처리.
     """
     result_holder = [None]
     error_holder  = [None]
@@ -36,8 +36,20 @@ def _run_in_new_loop(coro):
         asyncio.set_event_loop(loop)
         try:
             result_holder[0] = loop.run_until_complete(coro)
-        except Exception as e:
-            error_holder[0] = e
+        except BaseException as e:
+            # Python 3.11+ TaskGroup 에러는 ExceptionGroup 으로 래핑됨
+            eg_type = type(e)
+            if eg_type.__name__ in ("ExceptionGroup", "BaseExceptionGroup"):
+                # cleanup 과정의 CancelledError 는 무해 → 무시
+                real = [
+                    ex for ex in e.exceptions
+                    if not isinstance(ex, (asyncio.CancelledError, GeneratorExit))
+                ]
+                if real:
+                    error_holder[0] = real[0]
+                # real 이 없으면 cleanup 노이즈 → 무시 (result_holder 는 이미 채워짐)
+            else:
+                error_holder[0] = e
         finally:
             loop.close()
 
@@ -46,7 +58,6 @@ def _run_in_new_loop(coro):
     t.join(timeout=60)
 
     if error_holder[0]:
-        # 메인 스레드에서 로그 출력 (Streamlit 콘솔에 표시됨)
         logger.error(f"[MCP] 오류: {error_holder[0]}")
         raise error_holder[0]
 
@@ -173,6 +184,12 @@ def test_mcp_connection() -> dict:
         raw = _run_in_new_loop(
             _call_tool_async_debug("search_documents", {"query": "테스트"})
         )
+        # raw 가 None 이면 스레드 timeout 또는 내부 예외
+        if raw is None:
+            result["error"] = "도구 호출 결과가 None - 서버 응답 없음 또는 timeout"
+            print(f"[MCP TEST] raw=None: 서버 응답 없음")
+            return result
+
         result["test_call"] = raw.get("text", "")
         result["raw_result"] = raw.get("raw", "")
         print(f"[MCP TEST] raw 결과: {result['raw_result'][:300]}")
