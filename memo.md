@@ -31,5 +31,5 @@ DB 결과                ~300
 
 ---
 
-MCP 연결 테스트 방법 (cmd에서):
-python -c "from mcp.mcp_client import test_mcp_connection; import json; print(json.dumps(test_mcp_connection(), ensure_ascii=False, indent=2))"
+# MCP 연결 테스트 방법 (cmd에서):
+python -c "from call_mcp.mcp_client import test_mcp_connection; import json; print(json.dumps(test_mcp_connection(), ensure_ascii=False, indent=2))"
