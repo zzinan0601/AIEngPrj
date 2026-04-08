@@ -1,4 +1,4 @@
-# 기억 가능한 대화량
+8# 기억 가능한 대화량
 llama3.1:8b의 컨텍스트 윈도우가 128K 토큰이지만 실질적인 한계는 훨씬 작습니다.
 현재 프롬프트 구성에서 토큰 사용량을 계산하면:
 ---
@@ -32,4 +32,9 @@ DB 결과                ~300
 ---
 
 # MCP 연결 테스트 방법 (cmd에서):
-python -c "from call_mcp.mcp_client import test_mcp_connection; import json; print(json.dumps(test_mcp_connection(), ensure_ascii=False, indent=2))"
+python -c "
+from mcp.mcp_client import test_mcp_connection
+import json
+r = test_mcp_connection()
+print(json.dumps(r, ensure_ascii=False, indent=2))
+"
