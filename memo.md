@@ -28,3 +28,8 @@ DB 결과                ~300
 # 권장
 현재 시스템 구조에서는 방식 1 + 최근 10턴 슬라이딩 윈도우가 가장 현실적입니다. 
 수정 규모도 작고 llama3.1:8b 성능 범위 안에서 동작합니다.
+
+---
+
+MCP 연결 테스트 방법 (cmd에서):
+python -c "from mcp.mcp_client import test_mcp_connection; import json; print(json.dumps(test_mcp_connection(), ensure_ascii=False, indent=2))"
