@@ -66,8 +66,63 @@ def get_schema() -> str:
         return f"스키마 조회 오류: {str(e)}"
 
 
+@mcp_server.tool()
+def call_rest_api_sample(user_id: str) -> str:
+    """
+    REST API 호출 샘플 툴.
+    JSONPlaceholder(https://jsonplaceholder.typicode.com) 의 무료 테스트 API를
+    호출해서 사용자 정보와 해당 사용자의 게시물 목록을 반환합니다.
+
+    Args:
+        user_id: 조회할 사용자 ID (1~10)
+
+    실제 사용 시 이 함수를 복사해서 URL/헤더/인증 등을 수정하세요.
+    """
+    import httpx
+
+    base_url = "https://jsonplaceholder.typicode.com"
+
+    try:
+        # 1. 사용자 정보 조회
+        user_resp = httpx.get(f"{base_url}/users/{user_id}", timeout=10)
+        if user_resp.status_code != 200:
+            return f"사용자 조회 실패: HTTP {user_resp.status_code}"
+        user = user_resp.json()
+
+        # 2. 해당 사용자의 게시물 목록 조회
+        posts_resp = httpx.get(
+            f"{base_url}/posts",
+            params={"userId": user_id},
+            timeout=10,
+        )
+        posts = posts_resp.json() if posts_resp.status_code == 200 else []
+
+        # 3. 결과 포매팅
+        result_lines = [
+            f"[사용자 정보]",
+            f"이름: {user.get('name')}",
+            f"이메일: {user.get('email')}",
+            f"회사: {user.get('company', {}).get('name')}",
+            f"",
+            f"[게시물 목록] 총 {len(posts)}건",
+        ]
+        for p in posts[:5]:   # 최대 5건만 표시
+            result_lines.append(f"- [{p['id']}] {p['title']}")
+        if len(posts) > 5:
+            result_lines.append(f"  ... 외 {len(posts)-5}건")
+
+        return "\n".join(result_lines)
+
+    except httpx.TimeoutException:
+        return "REST API 호출 timeout"
+    except Exception as e:
+        return f"REST API 호출 오류: {str(e)}"
+
+
 if __name__ == "__main__":
+    import uvicorn
     port = config.MCP_SERVER_PORT
-    print(f"[MCP Server] SSE 모드로 시작: http://localhost:{port}")
-    # SSE 모드로 실행 (HTTP 서버)
-    mcp_server.run(transport="sse", port=port)
+    print(f"[MCP Server] SSE 모드로 시작: http://localhost:{port}/sse")
+    # mcp_server.run(transport="sse") 가 port 파라미터를 지원하지 않는 경우
+    # uvicorn 으로 직접 sse_app 을 실행
+    uvicorn.run(mcp_server.sse_app(), host="127.0.0.1", port=port)
