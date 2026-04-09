@@ -55,7 +55,7 @@ def _run_in_new_loop(coro):
 
     t = threading.Thread(target=thread_target, daemon=True)
     t.start()
-    t.join(timeout=60)
+    t.join(timeout=120)  # 임베딩 모델 첫 로드 시 시간이 걸릴 수 있음
 
     if error_holder[0]:
         logger.error(f"[MCP] 오류: {error_holder[0]}")
@@ -159,44 +159,63 @@ def list_mcp_tools() -> list:
 def test_mcp_connection() -> dict:
     """
     MCP 연결 및 도구 호출 테스트.
-    예: from mcp.mcp_client import test_mcp_connection; print(test_mcp_connection())
+    예: from call_mcp.mcp_client import test_mcp_connection; print(test_mcp_connection())
     """
-    import json
+    import subprocess
 
     result = {
-        "tools":        [],
-        "test_tool":    "",
-        "test_call":    "",
-        "raw_result":   "",   # content 원시 구조
-        "error":        "",
+        "server_script": _SERVER_SCRIPT,
+        "server_exists": os.path.exists(_SERVER_SCRIPT),
+        "tools":         [],
+        "test_call":     "",
+        "error":         "",
+        "stderr":        "",
     }
+
+    # 1. 서버 스크립트 존재 확인
+    print(f"[MCP TEST] 서버 경로: {_SERVER_SCRIPT}")
+    print(f"[MCP TEST] 파일 존재: {result['server_exists']}")
+
+    if not result["server_exists"]:
+        result["error"] = f"서버 스크립트 없음: {_SERVER_SCRIPT}"
+        return result
+
+    # 2. subprocess 직접 실행해서 stderr 확인 (임포트 오류 등 감지)
     try:
-        # 1. 도구 목록 확인
+        proc = subprocess.run(
+            [sys.executable, _SERVER_SCRIPT, "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        result["stderr"] = proc.stderr[:500] if proc.stderr else ""
+        print(f"[MCP TEST] subprocess stderr: {result['stderr']}")
+    except subprocess.TimeoutExpired:
+        result["stderr"] = "(timeout - 서버가 정상적으로 대기 중)"
+        print(f"[MCP TEST] subprocess 10초 timeout - 정상 징조")
+    except Exception as e:
+        result["stderr"] = str(e)
+        print(f"[MCP TEST] subprocess 실행 오류: {e}")
+
+    # 3. 도구 목록 확인
+    try:
         result["tools"] = list_mcp_tools()
         print(f"[MCP TEST] 도구 목록: {result['tools']}")
-
-        if not result["tools"]:
-            result["error"] = "도구 목록이 비어있음 - 서버 연결 실패 가능성"
-            return result
-
-        # 2. search_documents 로 테스트 (query 인자 포함)
-        result["test_tool"] = "search_documents"
-        raw = _run_in_new_loop(
-            _call_tool_async_debug("search_documents", {"query": "테스트"})
-        )
-        # raw 가 None 이면 스레드 timeout 또는 내부 예외
-        if raw is None:
-            result["error"] = "도구 호출 결과가 None - 서버 응답 없음 또는 timeout"
-            print(f"[MCP TEST] raw=None: 서버 응답 없음")
-            return result
-
-        result["test_call"] = raw.get("text", "")
-        result["raw_result"] = raw.get("raw", "")
-        print(f"[MCP TEST] raw 결과: {result['raw_result'][:300]}")
-
     except Exception as e:
-        result["error"] = str(e)
-        print(f"[MCP TEST] 오류: {e}")
+        result["error"] = f"도구 목록 조회 실패: {str(e)}"
+        print(f"[MCP TEST] 도구 목록 오류: {e}")
+        return result
+
+    if not result["tools"]:
+        result["error"] = "도구 목록이 비어있음"
+        return result
+
+    # 4. get_schema 도구 테스트 (모델 로드 없이 빠름)
+    try:
+        print(f"[MCP TEST] get_schema 호출 중...")
+        result["test_call"] = call_tool("get_schema", {})
+        print(f"[MCP TEST] get_schema 결과: {str(result['test_call'])[:200]}")
+    except Exception as e:
+        result["error"] = f"get_schema 호출 실패: {str(e)}"
+        print(f"[MCP TEST] get_schema 오류: {e}")
 
     return result
 
