@@ -38,7 +38,14 @@ def search_documents(query: str) -> str:
         results = search_and_rerank(query)
         if not results:
             return "관련 문서를 찾을 수 없습니다."
-        return "\n\n---\n\n".join(results)
+        # search_and_rerank 는 [{text, filename, chunk_index}] 반환
+        parts = []
+        for r in results:
+            text     = r.get("text", "")     if isinstance(r, dict) else str(r)
+            filename = r.get("filename", "") if isinstance(r, dict) else ""
+            cidx     = r.get("chunk_index", 0) if isinstance(r, dict) else 0
+            parts.append(f"[출처: {filename} 청크{cidx+1}]\n{text}")
+        return "\n\n---\n\n".join(parts)
     except Exception as e:
         return f"문서 검색 오류: {str(e)}"
 
