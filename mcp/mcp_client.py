@@ -29,12 +29,14 @@ def _run_in_new_loop(coro):
     """
     result_holder = [None]
     error_holder  = [None]
+    done_flag     = [False]   # 정상 완료 여부
 
     def thread_target():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             result_holder[0] = loop.run_until_complete(coro)
+            done_flag[0] = True
         except BaseException as e:
             eg_type = type(e).__name__
             if eg_type in ("ExceptionGroup", "BaseExceptionGroup"):
@@ -44,6 +46,9 @@ def _run_in_new_loop(coro):
                 ]
                 if real:
                     error_holder[0] = real[0]
+                else:
+                    # cleanup 노이즈만 있고 결과는 정상 완료됨
+                    done_flag[0] = True
             else:
                 error_holder[0] = e
         finally:
@@ -51,13 +56,17 @@ def _run_in_new_loop(coro):
 
     t = threading.Thread(target=thread_target, daemon=True)
     t.start()
-    t.join(timeout=30)   # SSE는 빠르므로 30초면 충분
+    t.join(timeout=300)  # stdio: subprocess 내 모델 로드 포함
 
-    if not t.is_alive() and result_holder[0] is None and error_holder[0] is None:
-        error_holder[0] = TimeoutError("MCP 서버 응답 없음 (30초 초과) - 서버가 실행 중인지 확인하세요")
+    # 스레드가 살아있으면 timeout
+    if t.is_alive():
+        error_holder[0] = TimeoutError(
+            "MCP 서버 응답 없음 (30초 초과)\n"
+            "서버가 실행 중인지 확인하거나 SSE 서버를 사용하세요."
+        )
 
     if error_holder[0]:
-        logger.error(f"[MCP] 오류: {error_holder[0]}")
+        print(f"[MCP ERROR] {type(error_holder[0]).__name__}: {error_holder[0]}", file=sys.stderr)
         raise error_holder[0]
 
     return result_holder[0]
@@ -172,30 +181,41 @@ async def _call_tool_stdio_async(tool_name: str, arguments: dict) -> str:
         command=sys.executable,
         args=[_STDIO_SERVER],
         env=None,
-        stderr=subprocess.PIPE,   # DEVNULL → PIPE 로 변경해 오류 캡처
+        stderr=subprocess.PIPE,
     )
 
-    async with stdio_client(server_params) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            result = await session.call_tool(tool_name, arguments=arguments)
+    try:
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                print(f"[STDIO DEBUG] initialize 완료, {tool_name} 호출 시작", file=sys.stderr)
 
-            # 디버그: result 전체 구조 stderr 로 출력
-            print(f"[STDIO DEBUG] result type : {type(result)}", file=sys.stderr)
-            print(f"[STDIO DEBUG] result raw  : {str(result)[:300]}", file=sys.stderr)
-            print(f"[STDIO DEBUG] isError     : {getattr(result, 'isError', 'N/A')}", file=sys.stderr)
+                result = await session.call_tool(tool_name, arguments=arguments)
 
-            content = getattr(result, "content", None)
-            print(f"[STDIO DEBUG] content     : {content}", file=sys.stderr)
+                print(f"[STDIO DEBUG] result type : {type(result)}", file=sys.stderr)
+                print(f"[STDIO DEBUG] result raw  : {str(result)[:300]}", file=sys.stderr)
+                print(f"[STDIO DEBUG] isError     : {getattr(result, 'isError', 'N/A')}", file=sys.stderr)
 
-            if content:
-                for i, item in enumerate(content):
-                    print(f"[STDIO DEBUG] content[{i}]: type={type(item)}, "
-                          f"text={str(getattr(item,'text',''))[:200]}", file=sys.stderr)
+                content = getattr(result, "content", None)
+                print(f"[STDIO DEBUG] content     : {content}", file=sys.stderr)
 
-            extracted = _extract_text(result)
-            print(f"[STDIO DEBUG] extracted   : {extracted[:200]}", file=sys.stderr)
-            return extracted
+                if content:
+                    for i, item in enumerate(content):
+                        print(
+                            f"[STDIO DEBUG] content[{i}]: type={type(item)}, "
+                            f"text={str(getattr(item, 'text', ''))[:200]}",
+                            file=sys.stderr,
+                        )
+
+                extracted = _extract_text(result)
+                print(f"[STDIO DEBUG] extracted   : {extracted[:200]}", file=sys.stderr)
+                return extracted
+
+    except Exception as e:
+        # 예외를 삼키지 않고 문자열로 반환 → result_holder 에 담겨 None 방지
+        err_msg = f"[STDIO 오류] {type(e).__name__}: {e}"
+        print(err_msg, file=sys.stderr)
+        return err_msg
 
 
 def call_tool_stdio(tool_name: str, arguments: dict) -> str:
