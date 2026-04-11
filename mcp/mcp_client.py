@@ -155,3 +155,71 @@ def test_mcp_connection() -> dict:
         print(f"[MCP TEST] 오류: {e}")
 
     return result
+
+
+# ── stdio 방식 클라이언트 (UI MCP 경유 토글용) ─────────────────────────────
+_PROJECT_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_STDIO_SERVER   = os.path.join(_PROJECT_ROOT, "call_mcp", "mcp_server_stdio.py")
+
+
+async def _call_tool_stdio_async(tool_name: str, arguments: dict) -> str:
+    """stdio 방식으로 MCP 서버 subprocess 를 띄워 도구 호출"""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    import subprocess
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[_STDIO_SERVER],
+        env=None,
+        stderr=subprocess.PIPE,   # DEVNULL → PIPE 로 변경해 오류 캡처
+    )
+
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments=arguments)
+
+            # 디버그: result 전체 구조 stderr 로 출력
+            print(f"[STDIO DEBUG] result type : {type(result)}", file=sys.stderr)
+            print(f"[STDIO DEBUG] result raw  : {str(result)[:300]}", file=sys.stderr)
+            print(f"[STDIO DEBUG] isError     : {getattr(result, 'isError', 'N/A')}", file=sys.stderr)
+
+            content = getattr(result, "content", None)
+            print(f"[STDIO DEBUG] content     : {content}", file=sys.stderr)
+
+            if content:
+                for i, item in enumerate(content):
+                    print(f"[STDIO DEBUG] content[{i}]: type={type(item)}, "
+                          f"text={str(getattr(item,'text',''))[:200]}", file=sys.stderr)
+
+            extracted = _extract_text(result)
+            print(f"[STDIO DEBUG] extracted   : {extracted[:200]}", file=sys.stderr)
+            return extracted
+
+
+def call_tool_stdio(tool_name: str, arguments: dict) -> str:
+    """stdio 방식 도구 호출 (동기)"""
+    return _run_in_new_loop(_call_tool_stdio_async(tool_name, arguments))
+
+
+def search_via_mcp(query: str) -> str:
+    """
+    MCP를 통해 문서 검색.
+    SSE 서버가 떠있으면 SSE 방식, 아니면 stdio 방식으로 자동 폴백.
+    """
+    try:
+        return call_tool("search_documents", {"query": query})
+    except Exception:
+        return call_tool_stdio("search_documents", {"query": query})
+
+
+def query_db_via_mcp(question: str) -> str:
+    """
+    MCP를 통해 DB 조회.
+    SSE 서버가 떠있으면 SSE 방식, 아니면 stdio 방식으로 자동 폴백.
+    """
+    try:
+        return call_tool("query_database", {"question": question})
+    except Exception:
+        return call_tool_stdio("query_database", {"question": question})
