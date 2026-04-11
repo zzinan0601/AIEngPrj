@@ -72,4 +72,13 @@ def get_schema() -> str:
 
 
 if __name__ == "__main__":
+    # 서버 시작 시 임베딩 모델 미리 로드 → 첫 도구 호출 시 timeout 방지
+    # (bge-m3 로드에 수십 초 소요, 미리 해두면 call_tool 응답이 빠름)
+    try:
+        from rag.embeddings import get_embeddings
+        get_embeddings()
+        print("[MCP Stdio] 임베딩 모델 로드 완료", file=sys.stderr)
+    except Exception as e:
+        print(f"[MCP Stdio] 임베딩 모델 로드 실패 (무시): {e}", file=sys.stderr)
+
     mcp_stdio.run(transport="stdio")
