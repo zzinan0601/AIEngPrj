@@ -1,28 +1,27 @@
 """
 call_mcp/mcp_server_stdio.py
-- UI의 'MCP 경유 호출' 토글용 stdio 방식 MCP 서버
-- mcp_server.py (SSE) 는 그대로 유지하고 이 파일을 추가로 사용
-- 핵심: 시작 즉시 stdout → stderr 리다이렉트
-  → 모듈 임포트 시 출력되는 모든 텍스트가 MCP 프로토콜을 오염시키지 않음
-- 클라이언트(mcp_client.py)가 subprocess로 이 파일을 직접 실행
+- stdio 방식 MCP 서버 (UI MCP 경유 토글용)
+- FastMCP 가 transport="stdio" 실행 시 sys.stdout 을 직접 사용하므로
+  임포트 구간에서만 stdout 을 차단하고 run() 직전에 복원
 """
 
 import sys
 import os
 
-# ── stdout 즉시 차단 (MCP 프로토콜 보호) ──────────────────────────────
-# 이 줄 이후의 모든 print/logging stdout 출력이 stderr로 리다이렉트됨
-# MCP stdio 프로토콜은 stdout만 사용하므로 stdout을 깨끗하게 유지해야 함
-_original_stdout = sys.stdout
-sys.stdout = sys.stderr
+# ── 임포트 중 stdout 차단 ─────────────────────────────────────────────
+# 모듈 임포트 시 발생하는 print/logging 이 MCP 프로토콜 stdout 을 오염시키는 것을 방지
+_real_stdout = sys.stdout
+sys.stdout   = open(os.devnull, "w")   # 임포트 구간만 /dev/null 로
 
-# 이제부터 임포트해도 stdout 오염 없음
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
     from fastmcp import FastMCP
+
+# stdout 복원 (FastMCP 내부에서 sys.stdout 을 직접 사용)
+sys.stdout = _real_stdout
 
 mcp_stdio = FastMCP(
     name="RAG-Agent-Stdio",
@@ -73,7 +72,4 @@ def get_schema() -> str:
 
 
 if __name__ == "__main__":
-    # stdout 을 원래대로 복원 후 MCP stdio 프로토콜 시작
-    # (FastMCP 내부에서 sys.stdout 을 직접 사용)
-    sys.stdout = _original_stdout
     mcp_stdio.run(transport="stdio")
