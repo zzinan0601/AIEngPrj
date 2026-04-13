@@ -69,34 +69,34 @@ def _parse_plan(raw: str, docs_exist: bool) -> list:
     LLM 응답에서 실행 계획(단계 목록)을 추출한다.
     JSON 배열 형태로 반환받고, 파싱 실패 시 폴백.
 
-    반환 예시: ["rag", "db"] / ["db"] / ["general"]
+    반환 예시: ["rag", "db"] / ["db"] / ["general"] / ["api"]
     """
     import json, re
 
-    # JSON 배열 추출 시도
     raw = raw.strip()
     match = re.search(r'\[.*?\]', raw, re.DOTALL)
     if match:
         try:
             steps = json.loads(match.group())
-            # rag / db / general 만 허용
+            # rag / db / general / api 허용
             valid = [s.strip().lower() for s in steps
-                     if s.strip().lower() in ("rag", "db", "general")]
+                     if s.strip().lower() in ("rag", "db", "general", "api")]
             if valid:
-                # 문서 없는데 rag 포함이면 제거
                 if not docs_exist:
                     valid = [s for s in valid if s != "rag"]
                 return valid if valid else ["general"]
         except Exception:
             pass
 
-    # 폴백: 단어 포함 여부로 판단
+    # 폴백
     text = raw.lower()
     steps = []
     if ("rag" in text or "document" in text or "문서" in text) and docs_exist:
         steps.append("rag")
     if "db" in text or "database" in text or "sql" in text or "데이터베이스" in text:
         steps.append("db")
+    if "api" in text or "rest" in text:
+        steps.append("api")
     if not steps:
         steps = ["general"]
     return steps
@@ -140,6 +140,7 @@ def planner_node(state: GraphState) -> dict:
     if docs_exist:
         avail_steps.append("rag (uploaded documents)")
     avail_steps.append("db (database query)")
+    avail_steps.append("api (REST API call via MCP)")
     avail_steps.append("general (LLM direct answer)")
 
     system_prompt = f"""You are a task planner for an AI assistant.
@@ -148,19 +149,19 @@ Analyze the question and create an execution plan as a JSON array.
 Available steps: {', '.join(avail_steps)}
 
 Rules:
-- Use ONLY step names: "rag", "db", "general"
+- Use ONLY step names: "rag", "db", "api", "general"
 - Order matters: put the step that should run FIRST first
 - Use only the steps actually needed
-- For complex questions needing multiple steps, list them in logical order
 - Output ONLY a JSON array, nothing else
 
 Examples:
 Q: "What is the refund policy in the document?" → ["rag"]
 Q: "How many orders last month?" → ["db"]
 Q: "Hello!" → ["general"]
+Q: "API로 사용자 1번 정보 조회해줘" → ["api"]
+Q: "REST API 호출해서 결과 보여줘" → ["api"]
+Q: "사용자 1번 API 조회하고 DB에서 관련 주문도 보여줘" → ["api", "db"]
 Q: "Summarize the document and show related sales data" → ["rag", "db"]
-Q: "What does the contract say about penalty? Also show penalty records from DB" → ["rag", "db"]
-Q: "Show total sales and explain the trend based on our report" → ["db", "rag"]
 Q: "2+2?" → ["general"]"""
 
     plan = None
@@ -210,7 +211,62 @@ def executor_node(state: GraphState) -> dict:
     }
 
 
-# ── 1-2. Step Done 노드 ────────────────────────────────────────────────────
+# ── 1-2. API 노드 ─────────────────────────────────────────────────────────
+def api_node(state: GraphState) -> dict:
+    """
+    MCP SSE 서버에 등록된 REST API 도구를 호출한다.
+    질문에서 파라미터를 LLM으로 추출한 뒤 call_rest_api_sample 도구를 실행.
+    실제 운영 시 mcp_server.py에 원하는 REST API 도구를 추가하면 됨.
+    """
+    question       = state["question"]
+    selected_model = state.get("selected_model") or config.LLM_MODEL
+    llm            = get_llm(selected_model)
+    logs           = [_log("🌐 REST API 호출 시작")]
+
+    # ── LLM으로 질문에서 파라미터 추출 ──────────────────────────────
+    param_prompt = """Extract the user_id parameter from the question.
+Output ONLY a number (1-10). If not found, output 1."""
+
+    user_id = "1"
+    try:
+        resp = llm.invoke([
+            SystemMessage(content=param_prompt),
+            HumanMessage(content=question),
+        ])
+        extracted = resp.content.strip()
+        # 숫자만 추출
+        import re
+        nums = re.findall(r'\d+', extracted)
+        if nums:
+            user_id = nums[0]
+        logs.append(_log(f"🔍 파라미터 추출: user_id={user_id}"))
+    except Exception as e:
+        logs.append(_log(f"⚠️ 파라미터 추출 실패, 기본값 사용: {e}"))
+
+    # ── MCP SSE 서버 도구 호출 ───────────────────────────────────────
+    api_result = ""
+    try:
+        from call_mcp.mcp_client import call_tool
+        api_result = call_tool("call_rest_api_sample", {"user_id": user_id})
+        logs.append(_log(f"✅ API 호출 완료 (user_id={user_id})"))
+    except Exception as e:
+        api_result = f"API 호출 오류: {str(e)}"
+        logs.append(_log(f"❌ API 오류: {str(e)}"))
+
+    # db_results 필드에 저장 (synthesize_node가 참조)
+    a2a_msg: A2AMessage = {
+        "sender": "api", "receiver": "synthesize",
+        "content": f"REST API 결과 전달 (user_id={user_id})",
+        "msg_type": "response",
+    }
+    return {
+        "db_results": api_result,   # synthesize가 db_results로 포함
+        "logs": logs,
+        "a2a_messages": [a2a_msg],
+    }
+
+
+# ── 1-3. Step Done 노드 ────────────────────────────────────────────────────
 def step_done_node(state: GraphState) -> dict:
     """
     한 단계 실행 완료 후 plan_idx 를 증가시킨다.
