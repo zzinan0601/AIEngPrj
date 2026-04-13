@@ -64,22 +64,24 @@ def _run_graph(question: str, prompt_config: dict, use_mcp: bool) -> dict:
     from agent.graph import get_graph
 
     initial_state = {
-        "question": question,
-        "route": "",
-        "context": "",
-        "sources": [],
-        "db_results": "",
+        "question":      question,
+        "plan":          [],
+        "plan_idx":      0,
+        "route":         "",
+        "context":       "",
+        "sources":       [],
+        "db_results":    "",
         "generated_sql": "",
-        "answer": "",
-        "logs": [],
-        "a2a_messages": [],
-        "iteration": 0,
+        "answer":        "",
+        "logs":          [],
+        "a2a_messages":  [],
+        "iteration":     0,
         "prompt_config": prompt_config,
-        "use_mcp": use_mcp,
+        "use_mcp":       use_mcp,
         "selected_model": st.session_state.get("selected_model", None),
-        "db_type": st.session_state.get("db_type", None),
-        "chart_request": False,
-        "chart_config": None,
+        "db_type":        st.session_state.get("db_type", None),
+        "chart_request":  False,
+        "chart_config":   None,
         "chat_history": [
             {"role": m["role"], "content": m["content"]}
             for m in st.session_state.get("chat_history", [])
@@ -135,23 +137,26 @@ def render_chat():
             # LangGraph 실행
             result = _run_graph(user_input, prompt_config, use_mcp)
 
-            answer = result.get("answer", "답변을 생성할 수 없습니다.")
-            logs        = result.get("logs", [])
-            a2a_msgs    = result.get("a2a_messages", [])
-            sql         = result.get("generated_sql", "")
-            route       = result.get("route", "")
-            context     = result.get("context", "")
+            answer       = result.get("answer", "답변을 생성할 수 없습니다.")
+            logs         = result.get("logs", [])
+            a2a_msgs     = result.get("a2a_messages", [])
+            sql          = result.get("generated_sql", "")
+            context      = result.get("context", "")
             chart_config = result.get("chart_config")
+            plan         = result.get("plan", [])
 
             status_placeholder.empty()
 
-            # 라우팅 경로 뱃지
-            if route:
-                route_emoji = {"rag":"📚","db":"🗄️","both":"📚🗄️","general":"💬"}.get(route,"")
-                if route == "rag" and not context:
+            # 실행 계획 뱃지
+            if plan:
+                emoji_map = {"rag": "📚", "db": "🗄️", "general": "💬"}
+                plan_str  = " → ".join(
+                    f"{emoji_map.get(s,'')}{s.upper()}" for s in plan
+                )
+                if plan == ["rag"] and not context:
                     st.warning("⚠️ 문서를 검색했지만 관련 내용을 찾지 못했습니다.")
                 else:
-                    st.caption(f"{route_emoji} 처리 경로: **{route.upper()}**")
+                    st.caption(f"📋 실행 계획: {plan_str}")
 
             st.markdown(answer)
 
