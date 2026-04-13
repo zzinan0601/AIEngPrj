@@ -18,6 +18,7 @@ from agent.state import GraphState
 from agent.nodes import (
     planner_node,
     executor_node,
+    api_node,
     step_done_node,
     rag_node,
     db_node,
@@ -62,6 +63,7 @@ def build_graph() -> StateGraph:
     # ── 노드 등록 ──────────────────────────────────────────────────
     graph.add_node("planner",    planner_node)
     graph.add_node("executor",   executor_node)
+    graph.add_node("api",        api_node)
     graph.add_node("rag",        rag_node)
     graph.add_node("db",         db_node)
     graph.add_node("general",    general_node)
@@ -82,6 +84,7 @@ def build_graph() -> StateGraph:
         {
             "rag":        "rag",
             "db":         "db",
+            "api":        "api",
             "general":    "general",
             "synthesize": "synthesize",
         },
@@ -91,6 +94,7 @@ def build_graph() -> StateGraph:
     graph.add_edge("rag",     "step_done")
     graph.add_edge("db",      "step_done")
     graph.add_edge("general", "step_done")
+    graph.add_edge("api",     "step_done")
 
     # ── step_done → executor(반복) | synthesize(완료) ─────────────
     graph.add_conditional_edges(
