@@ -41,7 +41,7 @@ def _log(msg: str) -> str:
     return f"[{ts}] {msg}"
 
 
-# ── 1. Router 노드 ─────────────────────────────────────────────────────────
+# ── 1. Planner 노드 ────────────────────────────────────────────────────────
 def _has_documents() -> bool:
     """Qdrant에 저장된 문서가 1개 이상 있으면 True"""
     try:
@@ -51,136 +51,178 @@ def _has_documents() -> bool:
         return False
 
 
-def _parse_route(raw: str) -> str:
-    """
-    LLM 응답에서 라우팅 키워드를 추출한다.
-    llama3.1:8b 는 "- rag", "rag.", "RAG (문서 관련)" 등 다양하게 반환하므로
-    완전 일치 대신 포함 여부로 판단한다.
-    """
-    text = raw.strip().lower()
-    # 우선순위: both > db > rag > general
-    if "both" in text:
-        return "both"
-    if "db" in text or "database" in text or "sql" in text or "데이터베이스" in text:
-        return "db"
-    if "rag" in text or "document" in text or "문서" in text:
-        return "rag"
-    if "general" in text or "일반" in text:
-        return "general"
-    return None   # 판단 불가 → 호출부에서 처리
-
-
 def _has_explicit_doc_reference(question: str) -> bool:
-    """
-    사용자가 명시적으로 문서 참조를 요청했는지 확인.
-    이 경우 LLM 판단 없이 즉시 rag로 강제한다.
-    """
+    """명시적 문서 참조 키워드 감지"""
     keywords = [
-        # 한국어
         "문서", "파일", "첨부", "업로드", "pdf", "txt", "docx",
         "참조", "참고", "기반으로", "바탕으로", "내용에서",
         "문서에서", "파일에서", "자료에서", "보고서에서",
-        # 영어
         "document", "file", "uploaded", "attached", "based on",
         "according to", "from the", "in the document", "in the file",
         "refer to", "reference",
     ]
-    q_lower = question.lower()
-    return any(kw in q_lower for kw in keywords)
+    return any(kw in question.lower() for kw in keywords)
 
 
-def router_node(state: GraphState) -> dict:
+def _parse_plan(raw: str, docs_exist: bool) -> list:
     """
-    질문을 분석해 처리 경로를 결정한다.
-    - rag    : 업로드된 문서에서 답을 찾아야 하는 경우
-    - db     : 데이터베이스 조회가 필요한 경우
-    - both   : 문서 + DB 모두 필요한 복합 질문
-    - general: 일반 대화/상식 질문
+    LLM 응답에서 실행 계획(단계 목록)을 추출한다.
+    JSON 배열 형태로 반환받고, 파싱 실패 시 폴백.
 
-    우선순위:
-    1. 명시적 문서 참조 키워드 → 즉시 rag (LLM 호출 생략)
-    2. LLM 분류 (영어 프롬프트 + 퓨샷)
-    3. LLM 판단 불가 + 문서 존재 → rag 폴백
-    4. 문서 없음 → general
+    반환 예시: ["rag", "db"] / ["db"] / ["general"]
     """
-    question = state["question"]
-    docs_exist = _has_documents()
+    import json, re
+
+    # JSON 배열 추출 시도
+    raw = raw.strip()
+    match = re.search(r'\[.*?\]', raw, re.DOTALL)
+    if match:
+        try:
+            steps = json.loads(match.group())
+            # rag / db / general 만 허용
+            valid = [s.strip().lower() for s in steps
+                     if s.strip().lower() in ("rag", "db", "general")]
+            if valid:
+                # 문서 없는데 rag 포함이면 제거
+                if not docs_exist:
+                    valid = [s for s in valid if s != "rag"]
+                return valid if valid else ["general"]
+        except Exception:
+            pass
+
+    # 폴백: 단어 포함 여부로 판단
+    text = raw.lower()
+    steps = []
+    if ("rag" in text or "document" in text or "문서" in text) and docs_exist:
+        steps.append("rag")
+    if "db" in text or "database" in text or "sql" in text or "데이터베이스" in text:
+        steps.append("db")
+    if not steps:
+        steps = ["general"]
+    return steps
+
+
+def planner_node(state: GraphState) -> dict:
+    """
+    LLM이 질문을 분석해 실행 계획(plan)을 수립한다.
+    - 단순 질문: ["general"] / ["rag"] / ["db"]
+    - 복합 질문: ["rag", "db"] / ["db", "rag"] 등 순서까지 결정
+    - both 개념 없음: LLM이 직접 단계와 순서를 결정
+    """
+    import json
+
+    question       = state["question"]
+    docs_exist     = _has_documents()
     selected_model = state.get("selected_model") or config.LLM_MODEL
+    llm            = get_llm(selected_model)
 
-    # ── 우선순위 1: 명시적 문서 참조 키워드 감지 ──────────────────
-    # "document를 참조해서", "문서에서", "파일 기반으로" 등이 있으면
-    # LLM 호출 없이 즉시 rag로 강제
+    # ── 명시적 문서 참조 키워드 → rag 우선 포함 ───────────────────
     if docs_exist and _has_explicit_doc_reference(question):
-        route = "rag"
-        log_msg = _log(f"🔀 라우팅 결정: [RAG] (명시적 문서 참조 감지)")
+        plan = ["rag"]
+        # DB 관련 키워드도 있으면 db 추가
+        q = question.lower()
+        if any(kw in q for kw in ["db", "조회", "데이터", "통계", "집계", "매출", "수량", "목록"]):
+            plan.append("db")
+        log_msg = _log(f"📋 계획 수립: {plan} (문서 키워드 감지)")
         a2a_msg: A2AMessage = {
-            "sender": "router",
-            "receiver": "rag",
-            "content": f"명시적 문서 참조 키워드 감지 → RAG 강제",
-            "msg_type": "request",
+            "sender": "planner", "receiver": str(plan),
+            "content": f"키워드 감지로 계획 수립: {plan}", "msg_type": "request",
         }
         return {
-            "route": route,
+            "plan": plan, "plan_idx": 0, "route": plan[0],
             "chart_request": _is_chart_request(question),
-            "logs": [log_msg],
-            "a2a_messages": [a2a_msg],
-            "iteration": state.get("iteration", 0),
+            "logs": [log_msg], "a2a_messages": [a2a_msg],
+            "iteration": 0,
         }
 
-    # ── 우선순위 2: LLM 분류 ──────────────────────────────────────
-    llm = get_llm(selected_model)
-    system_prompt = """You are a routing classifier. Output ONLY one word from: rag, db, both, general
+    # ── LLM 으로 계획 수립 ────────────────────────────────────────
+    avail_steps = []
+    if docs_exist:
+        avail_steps.append("rag (uploaded documents)")
+    avail_steps.append("db (database query)")
+    avail_steps.append("general (LLM direct answer)")
+
+    system_prompt = f"""You are a task planner for an AI assistant.
+Analyze the question and create an execution plan as a JSON array.
+
+Available steps: {', '.join(avail_steps)}
 
 Rules:
-- rag    : question about uploaded documents, files, manuals, reports, papers
-- db     : question requiring database query (statistics, counts, lists from DB)
-- both   : question requiring BOTH documents AND database
-- general: greeting, math, common knowledge, anything else
+- Use ONLY step names: "rag", "db", "general"
+- Order matters: put the step that should run FIRST first
+- Use only the steps actually needed
+- For complex questions needing multiple steps, list them in logical order
+- Output ONLY a JSON array, nothing else
 
 Examples:
-Q: "What does the document say about refund policy?" -> rag
-Q: "How many users registered last month?" -> db
-Q: "Summarize the report and show total sales" -> both
-Q: "Hello, how are you?" -> general
-Q: "What is the main topic of the uploaded file?" -> rag
-Q: "안녕하세요" -> general
-Q: "업로드한 문서에서 환불 정책을 알려줘" -> rag
-Q: "지난달 매출 합계는?" -> db
+Q: "What is the refund policy in the document?" → ["rag"]
+Q: "How many orders last month?" → ["db"]
+Q: "Hello!" → ["general"]
+Q: "Summarize the document and show related sales data" → ["rag", "db"]
+Q: "What does the contract say about penalty? Also show penalty records from DB" → ["rag", "db"]
+Q: "Show total sales and explain the trend based on our report" → ["db", "rag"]
+Q: "2+2?" → ["general"]"""
 
-Output ONLY the single word. No explanation."""
-
-    route = None
+    plan = None
     try:
         response = llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Q: {question}"),
         ])
-        route = _parse_route(response.content)
+        plan = _parse_plan(response.content, docs_exist)
     except Exception:
         pass
 
-    # ── 우선순위 3 & 4: 폴백 ─────────────────────────────────────
-    if route is None:
-        route = "rag" if docs_exist else "general"
+    if not plan:
+        plan = ["rag"] if docs_exist else ["general"]
 
-    if route in ("rag", "both") and not docs_exist:
-        route = "general"
-
-    # A2A 메시지: Router → 다음 에이전트에게 라우팅 결과 전달
+    log_msg = _log(f"📋 실행 계획: {plan}")
     a2a_msg: A2AMessage = {
-        "sender": "router",
-        "receiver": route,
-        "content": f"질문 '{question[:40]}' 을 {route} 경로로 라우팅",
-        "msg_type": "request",
+        "sender": "planner", "receiver": str(plan),
+        "content": f"계획 수립 완료: {plan}", "msg_type": "request",
+    }
+    return {
+        "plan": plan, "plan_idx": 0, "route": plan[0],
+        "chart_request": _is_chart_request(question),
+        "logs": [log_msg], "a2a_messages": [a2a_msg],
+        "iteration": 0,
     }
 
+
+# ── 1-1. Executor 노드 ─────────────────────────────────────────────────────
+def executor_node(state: GraphState) -> dict:
+    """
+    plan 에서 현재 단계를 꺼내 route 를 세팅한다.
+    실제 실행은 graph 의 조건부 엣지가 route 값으로 rag/db/general 로 분기한다.
+    """
+    plan     = state.get("plan", ["general"])
+    plan_idx = state.get("plan_idx", 0)
+
+    if plan_idx >= len(plan):
+        # 모든 단계 완료 → synthesize 로
+        return {"route": "__done__", "logs": [_log("✅ 모든 단계 완료 → 답변 생성")]}
+
+    current = plan[plan_idx]
     return {
-        "route": route,
-        "chart_request": _is_chart_request(question),
-        "logs": [_log(f"🔀 라우팅 결정: [{route.upper()}]")],
-        "a2a_messages": [a2a_msg],
-        "iteration": state.get("iteration", 0),
+        "route":    current,
+        "plan_idx": plan_idx,   # 아직 증가 안 함 (실행 후 증가)
+        "logs":     [_log(f"▶️  단계 {plan_idx+1}/{len(plan)}: [{current.upper()}] 실행")],
     }
+
+
+# ── 1-2. Step Done 노드 ────────────────────────────────────────────────────
+def step_done_node(state: GraphState) -> dict:
+    """
+    한 단계 실행 완료 후 plan_idx 를 증가시킨다.
+    다음 executor_node 호출 시 다음 단계로 넘어간다.
+    """
+    plan     = state.get("plan", [])
+    plan_idx = state.get("plan_idx", 0) + 1
+    return {
+        "plan_idx": plan_idx,
+        "logs": [_log(f"✔️  단계 완료 ({plan_idx}/{len(plan)})")],
+    }
+
 
 
 # ── 2. RAG 노드 ───────────────────────────────────────────────────────────
